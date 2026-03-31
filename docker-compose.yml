@@ -1,0 +1,10 @@
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"            # Edge port (SQS, S3, etc.)
+    environment:
+      - SERVICES=sqs,s3        # Solo levantamos lo que necesitamos
+      - DEBUG=1
+    volumes:
+      - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh" # Script de inicio
