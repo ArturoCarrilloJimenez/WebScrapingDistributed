@@ -6,6 +6,14 @@ resolution-markers = [
     "python_full_version < '3.14'",
 ]
 
+[manifest]
+members = [
+    "producer",
+    "shared",
+    "web-scraping-distributed",
+    "worker",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -367,7 +375,7 @@ wheels = [
 [[package]]
 name = "producer"
 version = "0.1.0"
-source = { virtual = "." }
+source = { virtual = "producer" }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "shared" },
@@ -376,7 +384,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.135.2" },
-    { name = "shared", directory = "../shared" },
+    { name = "shared", editable = "shared" },
 ]
 
 [[package]]
@@ -638,7 +646,7 @@ wheels = [
 [[package]]
 name = "shared"
 version = "0.1.0"
-source = { directory = "../shared" }
+source = { editable = "shared" }
 dependencies = [
     { name = "pydantic" },
 ]
@@ -820,6 +828,11 @@ wheels = [
 ]
 
 [[package]]
+name = "web-scraping-distributed"
+version = "0.1.0"
+source = { virtual = "." }
+
+[[package]]
 name = "websockets"
 version = "16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -854,3 +867,14 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/9f/3e/28135a24e384493fa804216b79a6a6759a38cc4ff59118787b9fb693df93/websockets-16.0-cp314-cp314t-win_amd64.whl", hash = "sha256:b14dc141ed6d2dde437cddb216004bcac6a1df0935d79656387bd41632ba0bbd", size = 178531, upload-time = "2026-01-10T09:23:35.016Z" },
     { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
 ]
+
+[[package]]
+name = "worker"
+version = "0.1.0"
+source = { virtual = "worker" }
+dependencies = [
+    { name = "shared" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "shared", editable = "shared" }]

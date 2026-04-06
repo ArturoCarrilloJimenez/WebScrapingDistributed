@@ -1,0 +1,24 @@
+# Entornos virtuales (NUNCA deben entrar en Docker)
+.venv/
+venv/
+ENV/
+producer/.venv/
+worker/.venv/
+
+# Caché de Python
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Datos y logs
+*.log
+localstack-data/
+.env
+
+# Git
+.git/
+.gitignore
+
+# Docker
+docker-compose.yml
+.dockerignore

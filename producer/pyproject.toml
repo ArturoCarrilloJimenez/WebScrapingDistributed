@@ -1,9 +1,13 @@
 [project]
 name = "producer"
 version = "0.1.0"
-description = "Add your description here"
+description = "API que produce los trabajos para que el worker scrape"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi[standard]>=0.135.2",
+    "shared",
 ]
+
+[tool.uv.sources]
+shared = { path = "../shared" }

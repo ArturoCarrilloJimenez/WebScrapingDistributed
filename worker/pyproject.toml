@@ -1,7 +1,12 @@
 [project]
 name = "worker"
 version = "0.1.0"
-description = "Add your description here"
+description = "Encargado de scrapear las web que el producer indica"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "shared",
+]
+
+[tool.uv.sources]
+shared = { path = "../shared" }

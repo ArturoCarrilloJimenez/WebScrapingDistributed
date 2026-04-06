@@ -1,10 +1,44 @@
 services:
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - "./producer:/app"
+      - "./shared:/app/shared"
+    depends_on:
+      - localstack
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    volumes:
+      - "./producer:/app"
+      - "./shared:/app/shared"
+    depends_on:
+      - localstack
+      - producer
+
   localstack:
     image: localstack/localstack:latest
     ports:
-      - "4566:4566"            # Edge port (SQS, S3, etc.)
+      - "4566:4566"  # Puerto principal para los servicios de LocalStack
     environment:
-      - SERVICES=sqs,s3        # Solo levantamos lo que necesitamos
+      - SERVICES=sqs
+      - DEFAULT_REGION=${DEFAULT_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
+      - DATA_DIR=/tmp/localstack/data
+      - ACTIVATE_PRO=0
       - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh" # Script de inicio
+      - localstack_data:/var/lib/localstack
+
+volumes:
+  localstack_data:
