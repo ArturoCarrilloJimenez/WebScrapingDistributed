@@ -5,6 +5,7 @@ description = "API que produce los trabajos para que el worker scrape"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aioboto3>=15.5.0",
     "fastapi[standard]>=0.135.2",
     "shared",
 ]

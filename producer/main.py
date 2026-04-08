@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from shared.models import ScrapingTask
+from shared import ScrapingTask
 
 app = FastAPI(title='Web Scraping Distributed', version='1.0')
 
