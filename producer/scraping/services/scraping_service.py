@@ -1,12 +1,14 @@
-from shared import SummaryBatchResponse
-from typing import List
-from typing import Any
-from scraping.models.bulk_task import BulkTaskRequest
-from shared import ScrapingTask, BatchResponse
+from shared.logging import Logger
+from typing import List, Any
+
+from shared import SummaryBatchResponse, ScrapingTask, BatchResponse
+from scraping.models import BulkTaskRequest
 from infrastructure.task.base import TaskProducer
 
 import asyncio
 from uuid import uuid4
+
+log = Logger("Scraping Tasks Orchestrator")
 
 
 class ScrapingOrchestrator:
@@ -40,10 +42,11 @@ class ScrapingOrchestrator:
     async def _process_in_parallel(
         self, urls: List[Any], request: List[BulkTaskRequest], job_id: str
     ) -> BatchResponse:
+        log.info("Iniciamos el procesaminto de tareas", request)
+
         # Dividimos el millón de URLs en trozos de 10 (lo que acepta SQS)
         url_chunks = [urls[i : i + 10] for i in range(0, len(urls), 10)]
 
-        str(uuid4())
         send_tasks = []
         for chunk in url_chunks:
             batch_id = str(uuid4())
@@ -54,8 +57,12 @@ class ScrapingOrchestrator:
 
             send_tasks.append(self.adapter.send_batch(tasks_in_batch))
 
+            log.info(f"Mapeamos y añadimos al envio el batch_id {batch_id}")
+
         # Ejecutamos todo y esperamos los reportes de cada lote
         batch_reports = await asyncio.gather(*send_tasks)
+
+        log.info("Obtenemos la respuesta de forma asincrona", batch_reports)
 
         return self._merge_reports(batch_reports, job_id, len(urls))
 

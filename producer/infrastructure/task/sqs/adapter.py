@@ -20,7 +20,11 @@ class SQSAioBotoAdapter(TaskProducer):
         if self._client is None:
             # Creamos el cliente una sola vez para reutilizar conexiones
             self._client = await self.session.client(
-                "sqs", region_name=self.region
+                "sqs",
+                region_name=self.region,
+                endpoint_url=self.queue_url,
+                aws_access_key_id=settings.aws_access_key_id,
+                aws_secret_access_key=settings.aws_secret_access_key,
             ).__aenter__()
         return self._client
 

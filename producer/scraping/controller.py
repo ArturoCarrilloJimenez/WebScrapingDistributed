@@ -1,12 +1,10 @@
-from dependencies.dependencies import get_scraping_orchestrator
-from fastapi import Depends
-from scraping.services.scraping_service import ScrapingOrchestrator
-from fastapi import BackgroundTasks
-from scraping.models.bulk_task import BulkTaskRequest
-from scraping.models.job_accepted_response import JobAcceptedResponse
-from typing import Any
-from fastapi import APIRouter
+from fastapi import Depends, BackgroundTasks, APIRouter
 from starlette import status
+
+from scraping.services import ScrapingOrchestrator
+from scraping.models import BulkTaskRequest, JobAcceptedResponse
+
+from dependencies import get_scraping_orchestrator
 
 routesScrapingTasks = APIRouter(
     prefix="/scraping",
@@ -25,7 +23,6 @@ async def create_scraping_job(
     background_tasks: BackgroundTasks,
     orchestrator: ScrapingOrchestrator = Depends(get_scraping_orchestrator),
 ) -> JobAcceptedResponse:
-
     # Envia la tarea a BackgroundTasks para que la procese de forma asincrona con la peticion
     # Esta se procesa una vez que al usuario ya le hemos dado el OK
     background_tasks.add_task(orchestrator.create_tasks_from_request, request)

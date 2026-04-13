@@ -4,15 +4,17 @@ from infrastructure.task.base import TaskProducer
 from scraping.services.scraping_service import ScrapingOrchestrator
 from fastapi import Depends
 
+_adapter_sqs_instance = SQSAioBotoAdapter(
+    queue_url=settings.sqs_queue_url, region=settings.default_region_aws
+)
 
-# 1. Proveedor de Infraestructura
+
+# Proveedor de Infraestructura
 def get_task_producer() -> TaskProducer:
-    return SQSAioBotoAdapter(
-        queue_url=settings.sqs_queue_url, region=settings.default_region_aws
-    )
+    return _adapter_sqs_instance
 
 
-# 2. Proveedor de Lógica de Negocio (Orquestador)
+# Proveedor de Lógica de Negocio (Orquestador)
 def get_scraping_orchestrator(
     producer: TaskProducer = Depends(get_task_producer),
 ) -> ScrapingOrchestrator:
