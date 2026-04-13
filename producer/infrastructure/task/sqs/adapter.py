@@ -1,9 +1,11 @@
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from shared import BatchResponse, ErrorsBatchResponse, SummaryBatchResponse
 import aioboto3
-import os
 from shared import ScrapingTask
 from typing import List
 from ..base import TaskProducer
+from config.settings import settings
 
 
 class SQSAioBotoAdapter(TaskProducer):
@@ -12,7 +14,7 @@ class SQSAioBotoAdapter(TaskProducer):
         self.region = region
         self.session = aioboto3.Session()
         self._client = None
-        self.NUM_MAX_TASKS = int(os.environ.get("NUM_MAX_TASKS") or 10)
+        self.NUM_MAX_TASKS = settings.num_max_tasks
 
     async def _get_client(self):
         if self._client is None:
@@ -21,6 +23,13 @@ class SQSAioBotoAdapter(TaskProducer):
                 "sqs", region_name=self.region
             ).__aenter__()
         return self._client
+
+    # Gestiona el ciclo de vida
+    @asynccontextmanager
+    async def lifespan(self, app: FastAPI):
+        await self._get_client()  # logica al iniciar
+        yield
+        await self.close()  # logica al cerrar
 
     async def send_batch(self, tasks: List[ScrapingTask]) -> BatchResponse:
         if len(tasks) > self.NUM_MAX_TASKS:
@@ -35,7 +44,7 @@ class SQSAioBotoAdapter(TaskProducer):
 
             # Crear tareas concurrentes
             entries = [
-                {"Id": t.job_id, "MessageBody": t.model_dump_json()} for t in tasks
+                {"Id": t.task_id, "MessageBody": t.model_dump_json()} for t in tasks
             ]
             response = await client.send_message_batch(
                 QueueUrl=self.queue_url, Entries=entries
@@ -55,14 +64,13 @@ class SQSAioBotoAdapter(TaskProducer):
                             retryable=not fail.get("SenderFault", False),
                         )
                     )
-        except:  # noqa: E722
+        except Exception as e:
             errors_report = [
                 ErrorsBatchResponse(
-                    task_id=original_task.task_id,
-                    url=original_task.url,
-                    reason=f"[{fail.get('Code')}] {fail.get('Message')}",
-                    # Si es SenderFault (error del cliente/formato), no es reintentable
-                    retryable=not fail.get("SenderFault", False),
+                    task_id=t.task_id,
+                    url=t.url,
+                    reason=f"[Internal Adapter Error: {type(e).__name__}] {str(e)}",
+                    retryable=True,
                 )
                 for t in tasks
             ]

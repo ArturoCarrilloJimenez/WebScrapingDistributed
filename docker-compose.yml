@@ -5,6 +5,9 @@ services:
       dockerfile: producer/Dockerfile
     ports:
       - "8000:8000"
+    environment:
+      - NUM_MAX_TASKS=${NUM_MAX_TASKS}
+      - PRODUCER_PORT=${PRODUCER_PORT}
     volumes:
       - "./producer:/app"
       - "./shared:/app/shared"
@@ -28,7 +31,7 @@ services:
       - "4566:4566"  # Puerto principal para los servicios de LocalStack
     environment:
       - SERVICES=sqs
-      - DEFAULT_REGION=${DEFAULT_REGION}
+      - DEFAULT_REGION=${DEFAULT_REGION_AWS}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}

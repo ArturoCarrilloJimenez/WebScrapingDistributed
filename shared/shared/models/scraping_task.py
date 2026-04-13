@@ -1,8 +1,8 @@
-from time import timezone
+from pydantic import ConfigDict
+from datetime import datetime, timezone
 from pydantic import BaseModel, HttpUrl, Field
 from typing import Optional, Dict, Any
 from uuid import uuid4
-from datetime import datetime
 
 
 class ScrapingTask(BaseModel):
@@ -37,7 +37,7 @@ class ScrapingTask(BaseModel):
         default=0, ge=0, description="Nivel de profundidad para modo recursivo"
     )
     max_depth: int = Field(
-        default=3, ge=0, description="Límite para evitar bucles infinitos"
+        default=1, ge=0, description="Límite para evitar bucles infinitos"
     )
 
     # Resiliencia
@@ -47,14 +47,10 @@ class ScrapingTask(BaseModel):
     )
 
     # Metadata y Auditoría
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     context: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
         description="Datos extra que viajan con la tarea (ej: ID de categoría, sesión)",
     )
 
-    class Config:
-        # Esto permite que Pydantic convierta tipos complejos (como HttpUrl) a strings fácilmente
-        json_encoders = {HttpUrl: lambda v: str(v)}
+    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)

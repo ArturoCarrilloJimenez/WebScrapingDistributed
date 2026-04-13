@@ -1,0 +1,1 @@
+uv sync --reinstall-package shared
