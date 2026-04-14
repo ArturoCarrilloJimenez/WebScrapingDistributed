@@ -8,6 +8,10 @@ services:
     environment:
       - NUM_MAX_TASKS=${NUM_MAX_TASKS}
       - PRODUCER_PORT=${PRODUCER_PORT}
+      - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
+      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     volumes:
       - "./producer:/app"
       - "./shared:/app/shared"
@@ -19,7 +23,7 @@ services:
       context: .
       dockerfile: worker/Dockerfile
     volumes:
-      - "./producer:/app"
+      - "./worker:/app"
       - "./shared:/app/shared"
     depends_on:
       - localstack
