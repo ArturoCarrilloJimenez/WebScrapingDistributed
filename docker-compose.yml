@@ -41,8 +41,7 @@ services:
       - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
       - DATA_DIR=/tmp/localstack/data
       - ACTIVATE_PRO=0
-      - DEBUG=1
-      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DEBUG=${LOCALSTACK_DEBUG:-0}
     volumes:
       - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh" # Script de inicio
       - localstack_data:/var/lib/localstack
