@@ -1,3 +1,5 @@
+import hmac
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7,12 +9,13 @@ from starlette.responses import JSONResponse
 from config.settings import settings
 from scraping.controller import routesScrapingTasks
 
-# Conditionally disable docs in production
+# Conditionally disable docs and OpenAPI schema in production
 app = FastAPI(
     title="Web Scraping Distributed",
     version="1.0",
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
+    openapi_url="/openapi.json" if settings.enable_docs else None,
 )
 
 
@@ -29,8 +32,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.EXCLUDED_PATHS:
             return await call_next(request)
 
-        api_key = request.headers.get("X-API-Key")
-        if api_key != settings.api_key:
+        api_key = request.headers.get("X-API-Key", "")
+        if not hmac.compare_digest(api_key, settings.api_key):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API key"},
