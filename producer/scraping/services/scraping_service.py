@@ -42,29 +42,46 @@ class ScrapingOrchestrator:
     async def _process_in_parallel(
         self, urls: List[Any], request: List[BulkTaskRequest], job_id: str
     ) -> BatchResponse:
-        log.info("Iniciamos el procesaminto de tareas", request)
+        log.info("Iniciamos el procesaminto de tareas", request.job_id)
+        urls = [
+            f"https://amazon.com/stresstest/{uuid4()}?index={i}" for i in range(1000000)
+        ]
 
-        # Dividimos el millón de URLs en trozos de 10 (lo que acepta SQS)
-        url_chunks = [urls[i : i + 10] for i in range(0, len(urls), 10)]
+        queue = asyncio.Queue(maxsize=100)
 
-        send_tasks = []
-        for chunk in url_chunks:
-            batch_id = str(uuid4())
-            # Envolvemos cada envío en el semáforo para no saturar la red
-            tasks_in_batch = [
-                self._map_to_task(batch_id, url, request) for url in chunk
-            ]
+        # Mapea las tareas
+        async def mapper():
+            chunks = [urls[i : i + 10] for i in range(0, len(urls), 10)]
+            for chunk in chunks:
+                batch_id = str(uuid4())
+                tasks = [self._map_to_task(batch_id, url, request) for url in chunk]
+                await queue.put(tasks)  # Mete el lote mapeado en la cola
+                log.info(f"Mapeamos el lote con id {batch_id}")
+            await queue.put(None)  # Señal de fin
 
-            send_tasks.append(self.adapter.send_batch(tasks_in_batch))
+        # Envia las tareas
+        async def sender():
+            results = []
+            while True:
+                batch = await queue.get()
+                if batch is None:
+                    break
 
-            log.info(f"Mapeamos y añadimos al envio el batch_id {batch_id}")
+                # Aquí usamos el semáforo para controlar la concurrencia de RED
+                async with self._semaphore:
+                    res = await self.adapter.send_batch(batch)
+                    results.append(res)
+                    log.info(f"Enviamos el lote {batch[0].batch_id}")
+                queue.task_done()
+            return results
 
-        # Ejecutamos todo y esperamos los reportes de cada lote
-        batch_reports = await asyncio.gather(*send_tasks)
+        results = await asyncio.gather(
+            mapper(), sender()
+        )  # Realizamos el procesaminto en parelelo
 
-        log.info("Obtenemos la respuesta de forma asincrona", batch_reports)
+        log.info("Obtenemos la respuesta", results)
 
-        return self._merge_reports(batch_reports, job_id, len(urls))
+        return self._merge_reports(results[1], request.job_id, len(urls))
 
     def _merge_reports(
         self, reports: List[BatchResponse], job_id: str, total: int

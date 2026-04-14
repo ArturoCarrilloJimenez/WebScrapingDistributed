@@ -1,3 +1,4 @@
+from shared.logging import Logger
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from shared import BatchResponse, ErrorsBatchResponse, SummaryBatchResponse
@@ -6,6 +7,8 @@ from shared import ScrapingTask
 from typing import List
 from ..base import TaskProducer
 from config.settings import settings
+
+log = Logger("SQS Adapter")
 
 
 class SQSAioBotoAdapter(TaskProducer):
@@ -69,11 +72,19 @@ class SQSAioBotoAdapter(TaskProducer):
                         )
                     )
         except Exception as e:
+            log.error(
+                "SQS send_batch failed",
+                {
+                    "error_type": type(e).__name__,
+                    "batch_size": len(tasks),
+                    "batch_id": tasks[0].batch_id,
+                },
+            )
             errors_report = [
                 ErrorsBatchResponse(
                     task_id=t.task_id,
                     url=t.url,
-                    reason=f"[Internal Adapter Error: {type(e).__name__}] {str(e)}",
+                    reason=f"[Internal Error: {type(e).__name__}] {str(e)}",
                     retryable=True,
                 )
                 for t in tasks
