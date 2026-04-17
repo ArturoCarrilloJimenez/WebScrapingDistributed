@@ -31,7 +31,7 @@ Esto permite que ambos lados escalen de forma independiente y que ninguna tarea 
 
 El Producer es una API FastAPI que no ejecuta scraping. Su única responsabilidad es recibir lotes de URLs, validarlos y despacharlos a la cola.
 
-> [!NOTE]  
+> [!NOTE]
 > Responde con `202 Accepted` de forma inmediata (`patrón Fire and Forget`), sin esperar a que el scraping termine.
 
 #### ¿Por qué FastAPI + aioboto3?
@@ -72,7 +72,7 @@ Esto evita que una URL problemática bloquee la cola principal indefinidamente.
 
 El worker es el único componente que ejecuta la lógica de scraping. Consume mensajes de SQS, ejecuta el parser indicado en `parser_type` y procesa el resultado.
 
-> [!NOTE]  
+> [!NOTE]
 > Actualmente este servicio se encuntra en desarrollo, aun que este es el funcionaminto planeado puede que en un futuro este cambie algunas partes
 
 ¿Por qué escala horizontalmente?
@@ -140,7 +140,7 @@ WebScrapingDistributed/
 | Docker Compose      | v2+             | Orquestación multi-contenedor                |
 | uv                  | latest          | Gestor de dependencias y entornos virtuales  |
 
-> [!NOTE]  
+> [!NOTE]
 > Si solo vas a levantar el proyecto con Docker, no necesitas tener Python ni uv instalados localmente.
 
 ---
@@ -214,7 +214,7 @@ uv sync
 uvicorn main:app --reload --port 8000
 ```
 
-> [!WARNING]  
+> [!WARNING]
 > En modo local necesitarás tener LocalStack corriendo por separado (`docker-compose up localstack -d`) para que el Producer pueda conectarse a SQS.
 
 ### 4. Verificar que funciona.
