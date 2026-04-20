@@ -7,9 +7,11 @@ from pydantic import BaseModel
 class SummaryBatchResponse(BaseModel):
     total: int = Field(default=0, description="Numero total de tareas")
 
-    processed: int = Field(default=0, description="Numero total de tareas procesadas")
+    processed: int = Field(
+        default=0, description="Numero total de tareas procesadas")
 
-    failed: int = Field(default=0, description="Numero total de tareas fallidas")
+    failed: int = Field(
+        default=0, description="Numero total de tareas fallidas")
 
 
 class ErrorsBatchResponse(BaseModel):
@@ -36,7 +38,8 @@ class BatchResponse(BaseModel):
         ..., description="ID del late de de la tarea para deduplicación"
     )
 
-    summary: SummaryBatchResponse = Field(description="Resumen de que ha procesado")
+    summary: SummaryBatchResponse = Field(
+        description="Resumen de que ha procesado")
 
     errors: List[ErrorsBatchResponse] = Field(
         default_factory=list, description="Lista con las tareas fallidas"

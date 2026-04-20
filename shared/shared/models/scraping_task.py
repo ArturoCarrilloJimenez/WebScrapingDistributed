@@ -1,11 +1,12 @@
-from pydantic import ConfigDict
 from datetime import datetime, timezone
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl, Field, model_validator, ConfigDict
 from typing import Optional, Dict, Any
 from uuid import uuid4
 
+from shared.models import ParserType, ParserValidatedMixin
 
-class ScrapingTask(BaseModel):
+
+class ScrapingTask(ParserValidatedMixin, BaseModel):
     # Identificadores de Rastreabilidad
     task_id: str = Field(
         default_factory=lambda: str(uuid4()),
@@ -22,17 +23,19 @@ class ScrapingTask(BaseModel):
     url: HttpUrl = Field(..., description="URL validada a extraer")
 
     # Configuración del Motor (Dinámico)
-    parser_type: str = Field(
+    parser_type: ParserType = Field(
         ...,
         description="Determina el script o lógica a usar (ej: 'static_css', 'playwright_amazon')",
     )
     parser_config: Dict[str, Any] = Field(
         default_factory=dict,
+        validate_default=True,
         description="Selectores CSS o parámetros para el script dinámico",
     )
 
     # Control de Flujo y Escalabilidad
-    priority: int = Field(default=1, ge=1, le=10, description="Prioridad en SQS (1-10)")
+    priority: int = Field(default=1, ge=1, le=10,
+                          description="Prioridad en SQS (1-10)")
     depth: int = Field(
         default=0, ge=0, description="Nivel de profundidad para modo recursivo"
     )
@@ -41,16 +44,19 @@ class ScrapingTask(BaseModel):
     )
 
     # Resiliencia
-    retry_count: int = Field(default=0, description="Contador de reintentos realizados")
+    retry_count: int = Field(
+        default=0, description="Contador de reintentos realizados")
     max_retries: int = Field(
         default=3, description="Máximo de intentos antes de ir a la DLQ"
     )
 
     # Metadata y Auditoría
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc))
     context: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
         description="Datos extra que viajan con la tarea (ej: ID de categoría, sesión)",
     )
 
-    model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(populate_by_name=True,
+                              arbitrary_types_allowed=True)
