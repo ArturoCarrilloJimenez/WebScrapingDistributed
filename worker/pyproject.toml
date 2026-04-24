@@ -5,6 +5,9 @@ description = "Encargado de scrapear las web que el producer indica"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aioboto3>=15.5.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.14.0",
     "shared",
 ]
 

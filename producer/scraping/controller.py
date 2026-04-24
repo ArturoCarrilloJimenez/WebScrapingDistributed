@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import Depends, BackgroundTasks, APIRouter
 from starlette import status
 
@@ -16,12 +18,11 @@ routesScrapingTasks = APIRouter(
 @routesScrapingTasks.post(
     "/tasks",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=JobAcceptedResponse,
 )
 async def create_scraping_job(
     request: BulkTaskRequest,
     background_tasks: BackgroundTasks,
-    orchestrator: ScrapingOrchestrator = Depends(get_scraping_orchestrator),
+    orchestrator: ScrapingOrchestrator = Annotated[Depends(get_scraping_orchestrator)],
 ) -> JobAcceptedResponse:
     # Envia la tarea a BackgroundTasks para que la procese de forma asincrona con la peticion
     # Esta se procesa una vez que al usuario ya le hemos dado el OK

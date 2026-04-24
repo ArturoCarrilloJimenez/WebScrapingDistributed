@@ -22,7 +22,7 @@ class ScrapingOrchestrator:
     ) -> BatchResponse:
         unique_urls = list(set(request.urls))
 
-        return await self._process_in_parallel(unique_urls, request, request.job_id)
+        return await self._process_in_parallel(unique_urls, request)
 
     def _map_to_task(
         self, batch_id: str, url: Any, request: BulkTaskRequest
@@ -40,12 +40,9 @@ class ScrapingOrchestrator:
         )
 
     async def _process_in_parallel(
-        self, urls: List[Any], request: List[BulkTaskRequest], job_id: str
+        self, urls: List[Any], request: List[BulkTaskRequest]
     ) -> BatchResponse:
         log.info("Iniciamos el procesaminto de tareas", request.job_id)
-        urls = [
-            f"https://amazon.com/stresstest/{uuid4()}?index={i}" for i in range(1000000)
-        ]
 
         queue = asyncio.Queue(maxsize=100)
 

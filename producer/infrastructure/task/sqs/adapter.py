@@ -12,7 +12,8 @@ log = Logger("SQS Adapter")
 
 
 class SQSAioBotoAdapter(TaskProducer):
-    def __init__(self, queue_url: str, region: str = "us-east-1"):
+    def __init__(self, endpoint_url: str, queue_url: str, region: str = "us-east-1"):
+        self.endpoint_url = endpoint_url
         self.queue_url = queue_url
         self.region = region
         self.session = aioboto3.Session()
@@ -25,7 +26,7 @@ class SQSAioBotoAdapter(TaskProducer):
             self._client = await self.session.client(
                 "sqs",
                 region_name=self.region,
-                endpoint_url=self.queue_url,
+                endpoint_url=self.endpoint_url,
                 aws_access_key_id=settings.aws_access_key_id,
                 aws_secret_access_key=settings.aws_secret_access_key,
             ).__aenter__()

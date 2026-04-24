@@ -3,9 +3,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     num_max_tasks: int
-    producer_port: int
-    producer_host: str
-    debug_mode: bool
     default_region_aws: str
     sqs_endpoint_url: str
     sqs_queue_url: str

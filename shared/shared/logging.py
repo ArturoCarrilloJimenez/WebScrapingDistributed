@@ -31,14 +31,14 @@ class StyleFormatter(logging.Formatter):
 
 class Logger:
     def __init__(self, name: str, level: int = logging.INFO):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(level)
-        self.logger.propagate = False
+        self._logger = logging.getLogger(name)
+        self._logger.setLevel(level)
+        self._logger.propagate = False
 
-        if not self.logger.handlers:
+        if not self._logger.handlers:
             handler = logging.StreamHandler(sys.stdout)
             handler.setFormatter(StyleFormatter())
-            self.logger.addHandler(handler)
+            self._logger.addHandler(handler)
 
     @staticmethod
     def _universal_serializer(obj: Any) -> Any:
@@ -66,7 +66,7 @@ class Logger:
             ctx_json = json.dumps(
                 context, default=self._universal_serializer, ensure_ascii=False
             )
-        except Exception as e:
+        except Exception:
             # Si incluso el serializador falla (ej. recursión infinita),
             # enviamos un mensaje de emergencia para no tirar el proceso.
             ctx_json = f'{{"log_error": "Serialization failed", "raw": "{str(context)[:100]}"}}'
@@ -75,13 +75,13 @@ class Logger:
 
     # Métodos de log (info, error, etc.) se mantienen igual llamando a self._build_msg
     def info(self, msg: str, context: Optional[Dict[str, Any]] = None):
-        self.logger.info(self._build_msg(msg, context))
+        self._logger.info(self._build_msg(msg, context))
 
     def error(self, msg: str, context: Optional[Dict[str, Any]] = None):
-        self.logger.error(self._build_msg(msg, context))
+        self._logger.error(self._build_msg(msg, context))
 
     def warning(self, msg: str, context: Optional[Dict[str, Any]] = None):
-        self.logger.warning(self._build_msg(msg, context))
+        self._logger.warning(self._build_msg(msg, context))
 
     def debug(self, msg: str, context: Optional[Dict[str, Any]] = None):
-        self.logger.debug(self._build_msg(msg, context))
+        self._logger.debug(self._build_msg(msg, context))

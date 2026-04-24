@@ -15,31 +15,29 @@ class ParserValidatedMixin:
         p_type = info.data.get("parser_type")
         
         if not p_type:
-            return v
-
-        try:
-            config_class = ContractFactory.get_config_class(p_type)
-            config_class(**(v or {}))
-        except Exception as e: # Capturamos ValidationError o ImportError del Factory
-            schema = config_class.model_json_schema()
-            
-            # Limpieza y extracción del esquema esperado
-            expected = {
-                field: {
-                    "type": props.get("type"),
-                    "required": field in schema.get("required", [])
+            try:
+                config_class = ContractFactory.get_config_class(p_type)
+                config_class(**(v or {}))
+            except Exception as e: # Capturamos ValidationError o ImportError del Factory
+                schema = config_class.model_json_schema()
+                
+                # Limpieza y extracción del esquema esperado
+                expected = {
+                    field: {
+                        "type": props.get("type"),
+                        "required": field in schema.get("required", [])
+                    }
+                    for field, props in schema.get("properties", {}).items()
                 }
-                for field, props in schema.get("properties", {}).items()
-            }
 
-            # LANZAMOS EL ERROR. Pydantic automáticamente le pondrá el loc: ["parser_config"]
-            raise PydanticCustomError(
-                "invalid_parser_config",
-                "El contrato para '{parser}' es inválido.",
-                {
-                    "parser": p_type.value,
-                    "expected_schema": expected,
-                    "errors": e.errors() if hasattr(e, 'errors') else str(e)
-                }
-            )
+                # LANZAMOS EL ERROR. Pydantic automáticamente le pondrá el loc: ["parser_config"]
+                raise PydanticCustomError(
+                    "invalid_parser_config",
+                    "El contrato para '{parser}' es inválido.",
+                    {
+                        "parser": p_type.value,
+                        "expected_schema": expected,
+                        "errors": e.errors() if hasattr(e, 'errors') else str(e)
+                    }
+                )
         return v
