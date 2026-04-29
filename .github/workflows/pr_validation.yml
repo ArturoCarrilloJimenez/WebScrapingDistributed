@@ -13,18 +13,21 @@ jobs:
     
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        # actions/checkout@v4.1.1
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
         with:
-          fetch-depth: 0  # SonarCloud needs full history for blame information
+          fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        # astral-sh/setup-uv@v3.0.0
+        uses: astral-sh/setup-uv@836476e3381a3ec95e7d206f345c26b52a970921
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        # actions/setup-python@v5.0.0
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ee4b7d10275c
         with:
           python-version-file: ".python-version"
 
@@ -35,7 +38,8 @@ jobs:
           uv run pytest test/ --cov=./ --cov-report=xml --junitxml=test-results.xml
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        # SonarSource/sonarcloud-github-action@v3.0.0 (Sustituye a @master)
+        uses: SonarSource/sonarcloud-github-action@e07e8688849b2512c1407336a546429b4703a890
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

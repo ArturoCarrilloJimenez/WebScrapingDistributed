@@ -57,6 +57,6 @@ def sqs_mock():
 async def async_client():
     """Async HTTP client for FastAPI app."""
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app), base_url="https://test"
     ) as client:
         yield client
