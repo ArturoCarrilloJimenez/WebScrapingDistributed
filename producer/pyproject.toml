@@ -12,3 +12,12 @@ dependencies = [
 
 [tool.uv.sources]
 shared = { path = "../shared" }
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "moto[sqs]",
+]

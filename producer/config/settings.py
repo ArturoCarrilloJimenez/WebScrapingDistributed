@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -12,8 +12,12 @@ class Settings(BaseSettings):
     aws_access_key_id: str
     aws_secret_access_key: str
 
-    class Config:
-        env_file = ".env"
+    # Se usa model_config con SettingsConfigDict
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",  # Opcional: ignora variables extra en el .env
+    )
 
 
 # Creamos la instancia aquí

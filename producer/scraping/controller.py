@@ -22,7 +22,7 @@ routesScrapingTasks = APIRouter(
 async def create_scraping_job(
     request: BulkTaskRequest,
     background_tasks: BackgroundTasks,
-    orchestrator: ScrapingOrchestrator = Annotated[Depends(get_scraping_orchestrator)],
+    orchestrator: Annotated[ScrapingOrchestrator, Depends(get_scraping_orchestrator)],
 ) -> JobAcceptedResponse:
     # Envia la tarea a BackgroundTasks para que la procese de forma asincrona con la peticion
     # Esta se procesa una vez que al usuario ya le hemos dado el OK
