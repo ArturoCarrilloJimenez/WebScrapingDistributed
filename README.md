@@ -230,6 +230,7 @@ Docs (Swagger): http://localhost:8000/docs
 - [x] Arquitectura asíncrona "Fire and Forget"
 - [x] Integración con SQS y manejo de lotes (batching)
 - [x] Sistema de logging estructurado con contexto
+- [ ] Implementar CI CD para asegurar la calidad del codigo en produccion (main)
 - [ ] Implementación del worker con Playwright/Selenium
 - [ ] Integración de S3 para el guardado de datos de forma dinámica.
 - [ ] Integrar una base de datos para la gestión de estados y gestión de tareas duplicadas.
