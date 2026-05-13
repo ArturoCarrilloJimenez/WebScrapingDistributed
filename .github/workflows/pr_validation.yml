@@ -14,23 +14,32 @@ jobs:
     name: Test and SonarCloud Analysis
     runs-on: ubuntu-latest
     
+    env:
+      DEFAULT_REGION_AWS: us-east-1
+      AWS_ACCESS_KEY_ID: testing 
+      AWS_SECRET_ACCESS_KEY: testing
+      SQS_ENDPOINT_URL: "http://localhost:4566"
+      SQS_QUEUE_URL: "http://localhost:4566/000000000000/test-queue"
+      NUM_MAX_TASKS: 10
+      PRODUCER_PORT: 8000
+      PRODUCER_HOST: "localhost"
+      DEBUG_MODE: "True"
+
+
     steps:
       - name: Checkout repository
-        # actions/checkout@v4.1.1
-        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
       - name: Install uv
-        # astral-sh/setup-uv@v3.0.0
-        uses: astral-sh/setup-uv@836476e3381a3ec95e7d206f345c26b52a970921
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           enable-cache: true
           cache-dependency-glob: "**/uv.lock"
 
       - name: Set up Python
-        # actions/setup-python@v5.0.0
-        uses: actions/setup-python@0a5c61591373683505ea898e09a3ee4b7d10275c
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version-file: ".python-version"
 
@@ -41,8 +50,8 @@ jobs:
           uv run pytest test/ --cov=./ --cov-report=xml --junitxml=test-results.xml
 
       - name: SonarCloud Scan
-        # SonarSource/sonarcloud-github-action@v3.0.0 (Sustituye a @master)
-        uses: SonarSource/sonarcloud-github-action@e07e8688849b2512c1407336a546429b4703a890
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          
