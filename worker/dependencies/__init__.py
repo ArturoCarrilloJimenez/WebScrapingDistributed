@@ -1,1 +1,1 @@
-from dependencies.dependencies import get_scraping_orchestrator
+from dependencies.dependencies import get_worker_controller, get_task_consumer

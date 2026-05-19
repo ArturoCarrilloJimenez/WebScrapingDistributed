@@ -15,6 +15,11 @@ class BaseConsumer(ABC, Generic[T]):
         pass
 
     @abstractmethod
+    async def acknowledge_batch(self, tasks: List[T]):
+        """Confirma que las tareas se procesaron con éxito (Delete/Commit)."""
+        pass
+
+    @abstractmethod
     async def heartbeat(self, task: T):
         """Mantiene la tarea bloqueada para este worker (Keep-alive)."""
         pass
