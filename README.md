@@ -14,12 +14,12 @@ El usuario envía una carga masiva de trabajo y recibe una respuesta instantáne
 
 ### Key Features
 
-| Feature                           | Descripción                                                                             |
-| --------------------------------- | --------------------------------------------------------------------------------------- |
-| Escalabilidad horizontal          | Diseñado para manejar picos de tráfico distribuyendo la carga en workers independientes |
-| Arquitectura asíncrona            | Implementación nativa con FastAPI y `asyncio` para evitar bloqueos de I/O               |
-| Contratos de Datos Robustos       | Validación estricta mediante Pydantic                                                   |
-| Infraestructura Cloud-Native      | Preparado para AWS (SQS/DLQ) y simulado localmente con LocalStack                       |
+| Feature                           | Descripción                                                                                                                                       |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Escalabilidad horizontal          | Diseñado para manejar picos de tráfico distribuyendo la carga en workers independientes                                                           |
+| Arquitectura asíncrona            | Implementación nativa con FastAPI y `asyncio` para evitar bloqueos de I/O                                                                         |
+| Contratos de Datos Robustos       | Validación estricta mediante Pydantic                                                                                                             |
+| Infraestructura Cloud-Native      | Preparado para AWS (SQS/DLQ) y simulado localmente con Floci ya que es openSource y no tiene las limitaciones de LocalStack                       |
 
 ## 🏗️ Arquitectura del Sistema
 
@@ -106,6 +106,7 @@ WebScrapingDistributed/
 │   ├── dependencies/          # Inyección de dependencias
 │   ├── infrastructure/        # Adaptadores de infraestructura (SQS, etc.)
 │   ├── scraping/              # Lógica de negocio y controladores de scraping
+│   ├── test/                  # Test unitarios y de implementation básicos para chequear el código
 │   ├── main.py                # Configuracion inicial de FastApi
 │   ├── Dockerfile
 │   └── README.md              # Documentación específica del servicio
@@ -122,7 +123,7 @@ WebScrapingDistributed/
 │       └── init.py        # Exportaciones públicas del paquete
 │
 ├── infra/                     # Scripts de infraestructura y despliegue
-│   └── init-aws.sh            # Inicialización de colas SQS en LocalStack
+│   └── init-aws.sh            # Inicialización el scipt de configuracion de aws
 │
 ├── docker-compose.yml         # Orquestación de todos los servicios
 ├── .env.template              # Plantilla de variables de entorno
@@ -164,25 +165,21 @@ cp .env.template .env
 Contenido del .env con valores por defecto para desarrollo local:
 
 ```py
-# Credenciales AWS (LocalStack)
+# Credenciales AWS (Floci)
 
 DEFAULT_REGION_AWS=us-east-1
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
-LOCALSTACK_AUTH_TOKEN=<tu_token>
 
 # SQS
 
-SQS_QUEUE_URL=http://localstack:4566/000000000000/scraping-tasks
+SQS_QUEUE_URL=http://localhost:4566/000000000000/scraping-tasks
 
 # Producer
 
 NUM_MAX_TASKS=10
 PRODUCER_PORT=8000
 ```
-
-> [!IMPORTANT]
-> LOCALSTACK_AUTH_TOKEN es necesario para arrancar LocalStack. Puedes obtener uno gratuito en localstack.cloud.
 
 ### 3. Levantar el proyecto
 
@@ -196,13 +193,13 @@ docker-compose up -d
 
 Esto arrancará tres servicios:
 
-| Servicio   | Puerto  | Descripción                                 |
-| ---------- | ------- | ------------------------------------------- |
-| producer   | 8000    | API FastAPI que orquesta las tareas         |
-| worker     | —       | Consumidor de tareas (sin puerto expuesto)  |
-| localstack | 4566    | Emulador de AWS (SQS)                       |
+| Servicio     | Puerto  | Descripción                                 |
+| ------------ | ------- | ------------------------------------------- |
+| producer     | 8000    | API FastAPI que orquesta las tareas         |
+| worker       | —       | Consumidor de tareas (sin puerto expuesto)  |
+| emulator-aws | 4566    | Emulador de AWS (SQS)                       |
 
-Al iniciar, LocalStack ejecuta automáticamente `infra/init-aws.sh`, que crea la cola principal (`scraping-tasks`) y su Dead Letter Queue (`scraping-tasks-dlq`).
+Al iniciar, Floci ejecuta automáticamente `infra/init-aws.sh`, que crea la cola principal (`scraping-tasks`) y su Dead Letter Queue (`scraping-tasks-dlq`).
 
 #### Opción B — Desarrollo local (solo Producer, worker en desarrollo)
 
@@ -215,7 +212,7 @@ uvicorn main:app --reload --port 8000
 ```
 
 > [!WARNING]
-> En modo local necesitarás tener LocalStack corriendo por separado (`docker-compose up localstack -d`) para que el Producer pueda conectarse a SQS.
+> En modo local necesitarás tener Floci corriendo por separado (`docker-compose up emulator-aws -d`) para que el Producer pueda conectarse a SQS.
 
 ### 4. Verificar que funciona.
 
@@ -230,7 +227,7 @@ Docs (Swagger): http://localhost:8000/docs
 - [x] Arquitectura asíncrona "Fire and Forget"
 - [x] Integración con SQS y manejo de lotes (batching)
 - [x] Sistema de logging estructurado con contexto
-- [ ] Implementar CI CD para asegurar la calidad del codigo en produccion (main)
+- [x] Implementar CI para asegurar la calidad del codigo en produccion (main), esto se ha añadido con SONAR
 - [ ] Implementación del worker con Playwright/Selenium
 - [ ] Integración de S3 para el guardado de datos de forma dinámica.
 - [ ] Integrar una base de datos para la gestión de estados y gestión de tareas duplicadas.

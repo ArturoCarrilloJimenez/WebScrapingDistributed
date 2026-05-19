@@ -1,10 +1,9 @@
 from shared.logging import Logger
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
 from shared import BatchResponse, ErrorsBatchResponse, SummaryBatchResponse
 import aioboto3
 from shared import ScrapingTask
 from typing import List
+from botocore.config import Config
 from ..base import TaskProducer
 from config.settings import settings
 
@@ -18,10 +17,15 @@ class SQSAioBotoAdapter(TaskProducer):
         self.region = region
         self.session = aioboto3.Session()
         self._client = None
-        self.NUM_MAX_TASKS = settings.num_max_tasks
+        # SQS limita a 10 tareas por lote
+        self.NUM_MAX_TASKS = min(settings.num_max_tasks, 10)
 
     async def _get_client(self):
         if self._client is None:
+            config = Config(
+                max_pool_connections=250,  # Sintonización para millones de peticiones
+                retries={'max_attempts': 3, 'mode': 'standard'}
+            )
             # Creamos el cliente una sola vez para reutilizar conexiones
             self._client = await self.session.client(
                 "sqs",
@@ -29,15 +33,9 @@ class SQSAioBotoAdapter(TaskProducer):
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=settings.aws_access_key_id,
                 aws_secret_access_key=settings.aws_secret_access_key,
+                config=config
             ).__aenter__()
         return self._client
-
-    # Gestiona el ciclo de vida
-    @asynccontextmanager
-    async def lifespan(self, app: FastAPI):
-        await self._get_client()  # logica al iniciar
-        yield
-        await self.close()  # logica al cerrar
 
     async def send_batch(self, tasks: List[ScrapingTask]) -> BatchResponse:
         if len(tasks) > self.NUM_MAX_TASKS:

@@ -16,7 +16,7 @@ services:
       - "./producer:/app"
       - "./shared:/app/shared"
     depends_on:
-      - localstack
+      - emulator-aws
 
   worker:
     build:
@@ -26,26 +26,23 @@ services:
       - "./worker:/app"
       - "./shared:/app/shared"
     depends_on:
-      - localstack
+      - emulator-aws
       - producer
 
-  localstack:
-    image: localstack/localstack:latest
+  emulator-aws:
+    image: floci/floci:latest-compat # <--- Añade el sufijo "-compat"
     ports:
-      - "4566:4566"  # Puerto principal para los servicios de LocalStack
+      - "4566:4566"
     environment:
-      - SERVICES=sqs
       - DEFAULT_REGION=${DEFAULT_REGION_AWS}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
-      - DATA_DIR=/tmp/localstack/data
-      - ACTIVATE_PRO=0
       - DEBUG=1
       - DOCKER_HOST=unix:///var/run/docker.sock
+      - FLOCI_STORAGE_MODE=hybrid
     volumes:
-      - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh" # Script de inicio
-      - localstack_data:/var/lib/localstack
+      - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
+      - localstack_data:/app/data
 
 volumes:
   localstack_data:
