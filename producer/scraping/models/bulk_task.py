@@ -14,7 +14,7 @@ class TaskModel(BaseModel, ParserValidatedMixin):
         default_factory=dict, validate_default=True)
     priority: int = Field(default=1, ge=1, le=10)
     max_depth: int = Field(default=1, ge=0)
-    max_retries: int = Field(default=3, ge=0)
+    max_retries: int = Field(default=3, ge=0, le=10)
 
     @field_validator("url", mode="after")
     @classmethod

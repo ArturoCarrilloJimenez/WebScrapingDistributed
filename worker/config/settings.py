@@ -3,8 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     num_max_tasks: int = 10
-    producer_port: int = 8000
-    producer_host: str = "localhost"
+    worker_num_max_concurrent_tasks: int = 10
     default_region_aws: str = "us-east-1"
     sqs_endpoint_url: str = "http://localhost:9324"  # URL del endpoint de SQS local
     sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue"  # URL de la cola SQS local

@@ -47,7 +47,7 @@ class ScrapingTask(ParserValidatedMixin, BaseModel):
     retry_count: int = Field(
         default=0, description="Contador de reintentos realizados")
     max_retries: int = Field(
-        default=3, description="Máximo de intentos antes de ir a la DLQ"
+        default=3, le=10, description="Máximo de intentos antes de ir a la DLQ"
     )
 
     # Metadata y Auditoría

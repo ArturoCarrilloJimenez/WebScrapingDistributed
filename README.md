@@ -228,8 +228,13 @@ Docs (Swagger): http://localhost:8000/docs
 - [x] Integración con SQS y manejo de lotes (batching)
 - [x] Sistema de logging estructurado con contexto
 - [x] Implementar CI para asegurar la calidad del codigo en produccion (main), esto se ha añadido con SONAR
-- [ ] Implementación del worker con Playwright/Selenium
+- [x] Implementar un un producer que sea capaz de gestionar nuevas tareas y enviarlas a la cola de mensajería
+- [ ] Hacer que el worker sea capaz de procesar de forma sencilla y aislada varios tipos de web a la vez
+- [ ] Implementación del worker con Playwright/Selenium de forma dinamica para web estaticas, dinamicas...
 - [ ] Integración de S3 para el guardado de datos de forma dinámica.
 - [ ] Integrar una base de datos para la gestión de estados y gestión de tareas duplicadas.
+- [ ] Implementar el CD para subir a production
+- [ ] Migrar a K8s y Terraform
+- [ ] Implementar Forward Proxy de Infraestructura para que el worker no tenga nada de red y hacer el proxi de cambio de ip entre otras para superar las barreras de seguridad con una una instancia configurada de mitmproxy, EnvyProxy o soluciones basadas en Envoy por ejemplo (Sugerencia)
 - [ ] Dashboard de Observabilidad (Redis/Streamlit)
 - [ ] Integración de modelos de IA para parsing inteligente

@@ -54,6 +54,14 @@ class SQSAioBotoAdapter(BaseConsumer):
                 # Inyectamos el ReceiptHandle en la metadata para poder hacer Ack luego
                 task = ScrapingTask.model_validate_json(msg["Body"])
                 task.context["_sqs_handle"] = msg["ReceiptHandle"]
+
+                # Obtenemos el número de intentos desde los atributos del mensaje para gestionar reintentos
+                # Debemos de hacerlo de esta forma porque SQS no reenvía el mismo mensaje con un contador de reintentos actualizado, sino que es el consumidor quien debe inferirlo a partir de los atributos del mensaje.
+                attributes = msg.get("Attributes", {})
+                approximate_receive_count = int(attributes.get("ApproximateReceiveCount", 1))
+
+                task.retry_count = approximate_receive_count - 1
+
                 tasks.append(task)
             except ValidationError as ve:
                 # Lógica de defensa contra Poison Pills
@@ -101,15 +109,20 @@ class SQSAioBotoAdapter(BaseConsumer):
                     "ReceiptHandle": handle
                 })
 
-        # SQS prohíbe lotes vacíos o mayores a 10 en operaciones Batch
         if entries:
-            # Dividimos en sub-lotes de 10 si se le pasa una lista mayor por error
             for i in range(0, len(entries), 10):
                 chunk = entries[i:i+10]
-                await client.delete_message_batch(
+                response = await client.delete_message_batch(
                     QueueUrl=self.queue_url,
                     Entries=chunk
                 )
+                
+                # Validar si SQS rechazó el borrado de algún mensaje de forma interna
+                if response.get("Failed"):
+                    log.error(
+                        "Errores parciales detectados en SQS delete_message_batch. Elementos no eliminados.",
+                        {"failed_entries": response["Failed"]}
+                    )
 
     async def heartbeat(self, task: ScrapingTask, visibility_timeout: int = 60):
         handle = task.context.get("_sqs_handle")
