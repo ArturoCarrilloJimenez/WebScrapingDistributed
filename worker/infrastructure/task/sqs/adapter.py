@@ -38,12 +38,12 @@ class SQSAioBotoAdapter(BaseConsumer):
             ).__aenter__()
         return self._client
 
-    async def fetch(self) -> List[ScrapingTask]:
+    async def fetch(self, batch_size: int = min(settings.num_max_tasks, 10)) -> List[ScrapingTask]:
         client = await self._get_client()
 
         response = await client.receive_message(
             QueueUrl=self.queue_url,
-            MaxNumberOfMessages=self.NUM_MAX_TASKS,
+            MaxNumberOfMessages=batch_size,
             WaitTimeSeconds=20,  # Long Polling activo para reducir costes y llamadas vacías
             AttributeNames=["All"]
         )

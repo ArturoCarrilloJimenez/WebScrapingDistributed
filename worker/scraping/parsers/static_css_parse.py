@@ -43,12 +43,13 @@ class StaticCSSParser(BaseParser):
                         is_empty.append(True)
 
                 # Si todos los selectores resultaron en listas vacías, consideramos que el esquema es inválido (posible cambio de DOM)
-                if all(is_empty):
+                if not selectors or all(is_empty):
                     raise ScrapingError(ErrorCategory.INVALID_SCHEMA, "Selectores no extrajeron datos (posible cambio de DOM)", task.task_id)
                 
             except ScrapingError:
                 raise
             except Exception as e:
                 self.log.error(f"Error al procesar la tarea {task.task_id}: {str(e)}")
+                raise ScrapingError(ErrorCategory.SERVER_ERROR, "Error inesperado durante el scraping", task.task_id, original_error=str(e))
 
             return self._prepare_result(task, extracted)
