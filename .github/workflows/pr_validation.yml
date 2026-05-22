@@ -49,6 +49,11 @@ jobs:
           uv sync --dev
           uv run pytest test/ --cov=./ --cov-report=xml --junitxml=test-results.xml
 
+      - name: Normalize coverage and test reports
+        run: |
+          sed -i 's|/home/runner/work/WebScrapingDistributed/WebScrapingDistributed/||g' producer/coverage.xml
+          sed -i 's|/home/runner/work/WebScrapingDistributed/WebScrapingDistributed/||g' producer/test-results.xml
+          
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8
         env:
