@@ -63,8 +63,10 @@ class WorkerController:
                 except Exception as e:
                     log.error(f"Error crítico en el loop del Engine: {str(e)}")
                     await asyncio.sleep(5)  # Evitar bucle de errores infinito
+                    
         except asyncio.CancelledError:
             log.warning("Bucle de ejecución interrumpido por señal de apagado del sistema.")
+            raise
 
         finally:
             log.warning("=== INICIANDO PROTOCOLO DE APAGADO SEGURO (FINALLY) ===")
@@ -119,57 +121,51 @@ class WorkerController:
 
     async def _ack_flusher(self):
         """
-        Consumidor en segundo plano encargado de agrupar ACKs en lotes de hasta 10
-        y enviarlos a SQS de un solo golpe de red sin fugas de excepciones.
+        Orquestador: Mantiene el flujo de ACK mientras el worker esté vivo.
         """
         log.info("Flusher de ACKs asíncrono inicializado.")
-        LINGER_TIME_SECS = 0.2  # Tiempo máximo a esperar para acumular un lote completo
-
+        
         while self.running or not self.ack_queue.empty() or self._active_tasks:
-            batch: List[ScrapingTask] = []
+            batch = await self._gather_batch()
+            if batch:
+                await self._process_batch(batch)
 
+    async def _gather_batch(self) -> List[ScrapingTask]:
+        """
+        Responsabilidad única: Recolectar hasta NUM_MAX_TASKS con un timeout.
+        """
+        batch = []
+        try:
+            # Espera inicial
+            timeout = 1.0 if self.running else 0.1
+            batch.append(await asyncio.wait_for(self.ack_queue.get(), timeout=timeout))
+        except asyncio.TimeoutError:
+            return batch
+
+        # Llenado del lote
+        deadline = asyncio.get_running_loop().time() + 0.2
+        while len(batch) < self.NUM_MAX_TASKS:
+            time_left = max(deadline - asyncio.get_running_loop().time(), 0.001)
             try:
-                # 1. Bloqueo controlado: Esperamos hasta 1 segundo a que entre la primera tarea del lote
-                current_timeout = 1.0 if self.running else 0.1 # Si ya no estamos corriendo, no queremos esperar tanto por nuevas tareas
-                task = await asyncio.wait_for(self.ack_queue.get(), timeout=current_timeout)
+                task = await asyncio.wait_for(self.ack_queue.get(), timeout=time_left)
                 batch.append(task)
             except asyncio.TimeoutError:
-                # Si no hay tareas en 1 segundo, volvemos a evaluar el estado del loop
-                continue
+                break
+        return batch
 
-            # Calculamos un deadline para no esperar indefinidamente por tareas adicionales y garantizar cierta fluidez en el ACK de SQS
-            deadline = asyncio.get_running_loop().time() + LINGER_TIME_SECS
+    async def _process_batch(self, batch: List[ScrapingTask]):
+        """
+        Responsabilidad única: Envío a SQS y limpieza de estados.
+        """
+        try:
+            await self.consumer.acknowledge_batch(batch)
+            log.info(f"Batch ACK completado para {len(batch)} tareas.")
+            for _ in batch:
+                self.ack_queue.task_done()
+        except Exception as e:
+            log.error(f"Fallo catastrófico en ACK: {str(e)}")
 
-            # 2.  Extraemos el resto hasta llenar el lote de SQS (máx 10)
-            while len(batch) < self.NUM_MAX_TASKS:
-                # Si llegamos al deadline, procesamos lo que tengamos sin esperar más
-                time_left = deadline - asyncio.get_running_loop().time()
-                if time_left <= 0:
-                    break
-
-                try:
-                    task = await asyncio.wait_for(self.ack_queue.get(), timeout=max(time_left, 0.001))
-                    batch.append(task)
-
-                except asyncio.TimeoutError:
-                    # Si la cola se vacía, salimos del empaquetado de forma segura y procedemos al ACK
-                    break
-
-            # 3. Despacho atómico del lote
-            if batch:
-                try:
-                    await self.consumer.acknowledge_batch(batch)
-                    log.info(
-                        f"Batch ACK completado con éxito para {len(batch)} tareas.")
-
-                    # Confirmamos el procesamiento a la cola de asyncio SOLO tras confirmar en SQS
-                    for _ in range(len(batch)):
-                        self.ack_queue.task_done()
-                except Exception as e:
-                    log.error(
-                        f"Fallo catastrófico al procesar el lote de ACKs en red: {str(e)}")
-
-    async def stop(self):
+    def stop(self):
         """Detiene el controlador asegurando que no se queden ACKs colgados en memoria"""
         log.info("Deteniendo el Worker Engine...")
         if not self.running:
