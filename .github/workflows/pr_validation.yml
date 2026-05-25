@@ -47,7 +47,7 @@ jobs:
         working-directory: ./producer
         run: |
           uv sync --dev
-          uv run pytest test/ --cov=./ --cov-report=xml --junitxml=test-results.xml
+          uv run pytest test/ --cov=./ --cov-report=xml:producer/coverage.xml --cov-config=producer/.coveragerc --junitxml=producer/test-results.xml
 
       - name: Normalize coverage and test reports
         run: |
