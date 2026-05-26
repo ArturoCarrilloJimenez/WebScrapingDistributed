@@ -75,7 +75,7 @@ class SQSAioBotoAdapter(BaseConsumer):
                     ReceiptHandle=msg["ReceiptHandle"]
                 )
             except Exception as e:
-                log.critical(
+                log.error(
                     "Fallo inesperado al deserializar mensaje en el adaptador.",
                     {"exception": type(e).__name__, "error": str(e)}
                 )
