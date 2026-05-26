@@ -6,7 +6,23 @@ import re
 from shared import ParserType, ParserValidatedMixin
 
 
-class BulkTaskRequest(ParserValidatedMixin, BaseModel):
+class TaskModel(BaseModel, ParserValidatedMixin):
+    url: HttpUrl = Field(..., min_length=1,
+                         max_length=100000, description="URL a scrapear")
+    parser_type: ParserType = Field(..., min_length=1)
+    parser_config: Dict[str, Any] = Field(
+        default_factory=dict, validate_default=True)
+    priority: int = Field(default=1, ge=1, le=10)
+    max_depth: int = Field(default=1, ge=0)
+    max_retries: int = Field(default=3, ge=0, le=10)
+
+    @field_validator("url", mode="after")
+    @classmethod
+    def convert_url_to_string(cls, v: HttpUrl) -> str:
+        return str(v)
+
+
+class BulkTaskRequest(BaseModel):
     # Configuración de Pydantic V2
     model_config = ConfigDict(
         str_strip_whitespace=True, arbitrary_types_allowed=True)
@@ -16,16 +32,10 @@ class BulkTaskRequest(ParserValidatedMixin, BaseModel):
         description="ID de la misión alfanumérico.",
     )
 
-    # El cambio clave: Usamos Annotated o forzamos la conversión si es necesario
-    urls: List[HttpUrl] = Field(
-        ..., min_length=1, max_length=100000, description="Lista de URLs validadas"
+    tasks: List[TaskModel] = Field(
+        ..., min_length=1, max_length=1000, description="Lista de tareas a ejecutar"
     )
 
-    parser_type: ParserType = Field(..., min_length=1)
-    parser_config: Dict[str, Any] = Field(default_factory=dict, validate_default=True)
-    priority: int = Field(default=1, ge=1, le=10)
-    max_depth: int = Field(default=1, ge=0)
-    max_retries: int = Field(default=3, ge=0)
     context: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("job_id")
@@ -34,10 +44,3 @@ class BulkTaskRequest(ParserValidatedMixin, BaseModel):
         if v and not re.match(r"^[a-zA-Z0-9\-_]+$", v):
             raise ValueError("job_id contiene caracteres no permitidos")
         return v
-
-    @field_validator("urls", mode="after")
-    @classmethod
-    def convert_urls_to_strings(cls, v: List[HttpUrl]) -> List[str]:
-        # ESTO es lo que te está rompiendo el flujo aguas abajo.
-        # Convertimos los objetos Url de Pydantic a strings puros.
-        return [str(url) for url in v]

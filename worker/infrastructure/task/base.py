@@ -1,9 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Generic, TypeVar
+from typing import List
 
-T = TypeVar("T")
-
-class BaseConsumer(ABC, Generic[T]):
+class BaseConsumer[T](ABC):
     @abstractmethod
     async def fetch(self, batch_size: int) -> List[T]:
         """Obtiene una ráfaga de tareas del broker."""
@@ -12,6 +10,11 @@ class BaseConsumer(ABC, Generic[T]):
     @abstractmethod
     async def acknowledge(self, task: T):
         """Confirma que la tarea se procesó con éxito (Delete/Commit)."""
+        pass
+
+    @abstractmethod
+    async def acknowledge_batch(self, tasks: List[T]):
+        """Confirma que las tareas se procesaron con éxito (Delete/Commit)."""
         pass
 
     @abstractmethod

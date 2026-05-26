@@ -25,7 +25,7 @@ awslocal sqs create-queue \
     --queue-name scraping-tasks \
     --attributes '{
         "VisibilityTimeout": "60",
-        "RedrivePolicy": "{\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\",\"maxReceiveCount\":\"3\"}"
+        "RedrivePolicy": "{\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\",\"maxReceiveCount\":\"10\"}"
     }'
 
 echo "----------- Infrastructure Ready -----------"
