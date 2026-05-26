@@ -71,6 +71,11 @@ jobs:
         with:
           path: artifacts
 
+      - name: Debug Artifacts
+        run: |
+          echo "Estructura de la carpeta artifacts:"
+          ls -R artifacts
+
       - name: Move artifacts to expected location
         run: |
           # Organizamos para que Sonar las encuentre según tu sonar-project.properties
