@@ -1,0 +1,88 @@
+import os
+import sys
+import pytest
+import boto3
+import socket
+from moto.server import ThreadedMotoServer
+
+# Forzar la inclusión del directorio 'worker' en el PATH de ejecución
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from config.settings import settings
+import dependencies.dependencies as worker_deps
+from infrastructure.task.sqs.adapter import SQSAioBotoAdapter
+
+@pytest.fixture(scope="session", autouse=True)
+def aws_credentials():
+    """Configura credenciales ficticias de AWS para asegurar aislamiento total."""
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_SECURITY_TOKEN"] = "testing"
+    os.environ["AWS_SESSION_TOKEN"] = "testing"
+    os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+
+
+@pytest.fixture(scope="session")
+def moto_sqs_port():
+    """
+    Reserva dinámicamente un puerto libre asignado por el sistema operativo.
+    Soluciona de raíz la ausencia del atributo '.port' en el ThreadedMotoServer.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture(scope="session")
+def moto_sqs_server(moto_sqs_port):
+    """
+    Levanta un servidor HTTP local en memoria que simula AWS SQS de forma real
+    utilizando el puerto libre previamente reservado.
+    """
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=moto_sqs_port)
+    server.start()
+    yield server
+    server.stop()
+
+
+@pytest.fixture(scope="function")
+def sqs_mock(moto_sqs_server, moto_sqs_port):
+    """
+    Inicializa la cola SQS en el servidor Moto local e inyecta el adaptador apuntando a él.
+    """
+    # Usamos el puerto que conocemos con total certeza
+    endpoint_url = f"http://127.0.0.1:{moto_sqs_port}"
+    
+    # El cliente síncrono de boto3 crea la cola comunicándose con el servidor local
+    client = boto3.client("sqs", region_name="us-east-1", endpoint_url=endpoint_url)
+    queue = client.create_queue(QueueName="test-queue")
+    queue_url = queue["QueueUrl"]
+    
+    # Guardamos el estado original de los Singletons para el Teardown
+    original_queue_url = settings.sqs_queue_url
+    original_adapter_instance = worker_deps._adapter_sqs_instance
+
+    # Forzamos la configuración del test hacia la cola dinámica de Moto
+    settings.sqs_queue_url = queue_url
+
+    # Instanciamos el adaptador asíncrono apuntando directamente al endpoint HTTP de Moto
+    mocked_adapter = SQSAioBotoAdapter(
+        endpoint_url=endpoint_url,
+        queue_url=queue_url,
+        region="us-east-1"
+    )
+    
+    # Inyección de dependencia limpia por reemplazo de referencia global
+    worker_deps._adapter_sqs_instance = mocked_adapter
+
+    yield client
+
+    # Clean State: Restauración absoluta para evitar contaminación de memoria en la suite
+    settings.sqs_queue_url = original_queue_url
+    worker_deps._adapter_sqs_instance = original_adapter_instance
+
+
+@pytest.fixture(scope="function")
+def worker_controller(sqs_mock):
+    """Proporciona el controlador configurado contra la infraestructura local."""
+    return worker_deps.get_worker_controller()

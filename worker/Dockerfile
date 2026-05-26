@@ -20,11 +20,11 @@ COPY worker/ ./worker/
 WORKDIR /usr/src/app/worker
 
 # 5. Instalamos
-RUN uv sync \
+RUN --frozen --no-dev --no-build \
     && chown -R appuser:appgroup /usr/src/app
     
 USER appuser
 
 ENV PATH="/usr/src/app/worker/.venv/bin:$PATH"
 # 5. Ejecución
-CMD ["uv", "run", "python", "main.py"]
+CMD ["python", "main.py"]
