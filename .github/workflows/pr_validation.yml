@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [producer]
+        service: [producer, worker]
 
     steps:
       - name: Checkout repository
