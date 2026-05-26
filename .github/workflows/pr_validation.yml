@@ -66,24 +66,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all test reports
+      # Descarga el reporte de producer directamente en la carpeta 'producer/'
+      - name: Download Producer Reports
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          path: artifacts
+          name: reports-producer
+          path: producer
+        continue-on-error: true
+
+      # Descarga el reporte de worker directamente en la carpeta 'worker/'
+      - name: Download Worker Reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: reports-worker
+          path: worker
+        continue-on-error: true
 
       - name: Debug Artifacts
         run: |
           echo "Estructura de la carpeta artifacts:"
           ls -R artifacts
-
-      - name: Move artifacts to expected location
-        run: |
-          # Organizamos para que Sonar las encuentre según tu sonar-project.properties
-          mkdir -p producer worker
-          cp artifacts/reports-producer/coverage.xml producer/coverage.xml
-          cp artifacts/reports-producer/test-results.xml producer/test-results.xml
-          cp artifacts/reports-worker/coverage.xml worker/coverage.xml
-          cp artifacts/reports-worker/test-results.xml worker/test-results.xml
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
