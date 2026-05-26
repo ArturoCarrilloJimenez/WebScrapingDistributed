@@ -20,9 +20,9 @@ COPY worker/ ./worker/
 WORKDIR /usr/src/app/worker
 
 # 5. Instalamos
-RUN uv sync
-
-RUN chown -R appuser:appgroup /usr/src/app
+RUN uv sync \
+    && chown -R appuser:appgroup /usr/src/app
+    
 USER appuser
 
 ENV PATH="/usr/src/app/worker/.venv/bin:$PATH"

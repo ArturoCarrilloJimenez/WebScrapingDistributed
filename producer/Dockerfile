@@ -21,9 +21,9 @@ WORKDIR /usr/src/app/producer
 
 # 5. Instalamos
 # Eliminamos cualquier rastro de configuración previa
-RUN uv sync
-
-RUN chown -R appuser:appgroup /usr/src/app
+RUN uv sync \
+    && chown -R appuser:appgroup /usr/src/app
+    
 USER appuser
 
 ENV PATH="/usr/src/app/producer/.venv/bin:$PATH"
