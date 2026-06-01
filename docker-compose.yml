@@ -9,7 +9,8 @@ services:
       - NUM_MAX_TASKS=${NUM_MAX_TASKS}
       - PRODUCER_PORT=${PRODUCER_PORT}
       - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
-      - SQS_QUEUE_URL=${SQS_QUEUE_URL}
+      - SQS_ENDPOINT_URL=http://emulator-aws:4566
+      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     volumes:
@@ -22,6 +23,18 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+    environment:
+      - NUM_MAX_TASKS=10
+      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS}
+      - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
+      - SQS_ENDPOINT_URL=http://emulator-aws:4566
+      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - PROXY_ENABLED=${PROXY_ENABLED}
+      - PROXY_MODE=${PROXY_MODE}
+      - PROXY_STATIC_LIST=${PROXY_STATIC_LIST}
+      - PROXY_URL=${PROXY_URL}
     volumes:
       - "./worker:/app"
       - "./shared:/app/shared"
@@ -30,7 +43,7 @@ services:
       - producer
 
   emulator-aws:
-    image: floci/floci:latest-compat # <--- Añade el sufijo "-compat"
+    image: floci/floci:latest-compat
     ports:
       - "4566:4566"
     environment:

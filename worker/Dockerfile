@@ -20,7 +20,7 @@ COPY worker/ ./worker/
 WORKDIR /usr/src/app/worker
 
 # 5. Instalamos
-RUN --frozen --no-dev --no-build \
+RUN uv sync --frozen --no-dev \
     && chown -R appuser:appgroup /usr/src/app
     
 USER appuser

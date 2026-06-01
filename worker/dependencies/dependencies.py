@@ -1,9 +1,11 @@
-from config.settings import settings
+from config.settings import ProxyMode, settings
 from infrastructure.task.sqs.adapter import SQSAioBotoAdapter
 from infrastructure.task.base import BaseConsumer
 from infrastructure.network.client import SecureNetworkClient
 from scraping.parsers.factory import ParserFactory
 from scraping.controller import WorkerController
+from infrastructure.network.proxy import StaticPoolProxyProvider, BackconnectProxyProvider
+
 
 # Instancias Únicas (Singletons de Infraestructura)
 _adapter_sqs_instance = SQSAioBotoAdapter(
@@ -12,15 +14,25 @@ _adapter_sqs_instance = SQSAioBotoAdapter(
     region=settings.default_region_aws
 )
 
-_network_client_instance = SecureNetworkClient()
-
 
 def get_task_consumer() -> BaseConsumer:
     return _adapter_sqs_instance
 
 
 def get_secure_network_client() -> SecureNetworkClient:
-    return _network_client_instance
+    if not settings.proxy_enabled:
+        return SecureNetworkClient(proxy_provider=None)
+
+    # Configuramos el proveedor de proxies según el modo seleccionado en la configuración
+    if settings.proxy_mode == ProxyMode.STATIC_POOL:
+        raw_list = settings.proxy_static_list or ""
+        proxy_urls = [url.strip()
+                      for url in raw_list.split(",") if url.strip()]
+        provider = StaticPoolProxyProvider(proxy_urls)
+    else:
+        provider = BackconnectProxyProvider(settings.proxy_url or None)
+
+    return SecureNetworkClient(proxy_provider=provider)
 
 
 def get_parser_factory() -> ParserFactory:
@@ -33,7 +45,7 @@ def get_worker_controller(max_concurrency: int = settings.worker_num_max_concurr
     # Resolvemos limpiamente el grafo de dependencias del sistema
     consumer = get_task_consumer()
     parser_factory = get_parser_factory()
-    
+
     return WorkerController(
         consumer=consumer,
         parser_factory=parser_factory,

@@ -21,7 +21,7 @@ WORKDIR /usr/src/app/producer
 
 # 5. Instalamos
 # Eliminamos cualquier rastro de configuración previa
-RUN uv sync --frozen --no-dev --no-build \
+RUN uv sync --frozen --no-dev \
     && chown -R appuser:appgroup /usr/src/app
     
 USER appuser
