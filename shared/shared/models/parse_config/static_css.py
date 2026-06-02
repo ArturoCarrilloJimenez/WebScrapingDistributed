@@ -13,8 +13,3 @@ class Config(BaseParserConfig):
         min_length=1,
         description="Mapeo de nombre de campo a selector CSS. Ej: {'precio': '.price-tag'}"
     )
-    
-    wait_for_selector: str | None = Field(
-        None, 
-        description="Opcional: Esperar a que este selector aparezca antes de extraer."
-    )

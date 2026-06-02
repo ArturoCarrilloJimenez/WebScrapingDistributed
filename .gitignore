@@ -13,3 +13,4 @@ uv.lock
 coverage.xml
 test-results.xml
 *.log
+*.xml
