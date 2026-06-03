@@ -12,6 +12,10 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
     Test de integración total: Valida que el Worker extraiga un mensaje de SQS,
     lo procese a través del motor asíncrono, invoque al parser y envíe el ACK (borrado).
     """
+    # Override concurrency for testing to avoid concurrent SQS fetch requests blocking Moto
+    worker_controller.max_concurrency = 5
+    worker_controller.semaphore = asyncio.Semaphore(5)
+
     # 1. Escenario: Publicamos un mensaje real incluyendo todos los campos obligatorios del modelo
     task_payload = {
         "job_id": "job_worker_test_001",
@@ -42,9 +46,11 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
         # 3. Ejecución: Lanzamos el motor asíncronamente en segundo plano
         worker_task = asyncio.create_task(worker_controller.run())
 
-        # Tiempo prudencial para que el loop realice Long Polling hacia Moto local,
-        # procese el mensaje, invoque al wrapper y el flusher envíe el lote de borrado
-        await asyncio.sleep(1.5)
+        # Esperamos dinámicamente a que se procese el mensaje y se llame al parser (máx 8s)
+        for _ in range(80):
+            if mock_parser.parse.call_count > 0:
+                break
+            await asyncio.sleep(0.1)
 
         # 4. Apagado Controlado: Detenemos el motor emulando la parada del contenedor
         worker_controller.stop()

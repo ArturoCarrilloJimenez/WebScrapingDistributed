@@ -51,3 +51,95 @@ async def test_adapter_acknowledge_batch_logs_partial_failures():
     # No debe lanzar excepción, debe procesar la respuesta, leer el nodo 'Failed' y loguearlo
     await adapter.acknowledge_batch([task])
     mock_client.delete_message_batch.assert_called_once()
+
+
+async def test_adapter_fetch_parallel_cancellation():
+    """Valida que al hacer fetch > 10, si una petición asíncrona trae datos, se cancelen las demás."""
+    adapter = SQSAioBotoAdapter(endpoint_url="http://mock", queue_url="http://queue")
+    
+    # Simulamos que la primera petición paralela responde rápido con tareas,
+    # y la segunda simula quedar colgada (no responde de inmediato).
+    task_mock = ScrapingTask(
+        job_id="j", batch_id="b", task_id="t-01", url="https://x.com",
+        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
+    )
+    task_mock.context["_sqs_handle"] = "h-01"
+    
+    async def mock_fetch_fast(size):
+        return [task_mock]
+        
+    async def mock_fetch_slow(size):
+        # Simula long polling lento
+        await asyncio.sleep(10.0)
+        return []
+
+    # Mockeamos _fetch_single_batch para que asigne las respuestas en orden
+    call_count = 0
+    async def mock_fetch_single(size):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return await mock_fetch_fast(size)
+        else:
+            return await mock_fetch_slow(size)
+            
+    adapter._fetch_single_batch = mock_fetch_single
+
+    # batch_size=20 provoca 2 llamadas paralelas concurrentes
+    tasks = await adapter.fetch(batch_size=20)
+    
+    assert len(tasks) == 1
+    assert tasks[0].task_id == "t-01"
+    # El test debe terminar de inmediato porque la segunda tarea lenta fue cancelada asíncronamente
+
+
+async def test_adapter_heartbeat_error_handling():
+    """Valida que si falla la red (botocore lanza excepción) durante el heartbeat, el adaptador lo capture y loguee."""
+    adapter = SQSAioBotoAdapter(endpoint_url="http://mock", queue_url="http://queue")
+    
+    mock_client = AsyncMock()
+    # Forzamos una excepción de red al intentar actualizar la visibilidad en SQS
+    mock_client.change_message_visibility.side_effect = Exception("SQS network connection dropped catastrophically")
+    adapter._get_client = AsyncMock(return_value=mock_client)
+    
+    task = ScrapingTask(
+        job_id="j", batch_id="b", task_id="t-01", url="https://x.com",
+        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
+    )
+    task.context["_sqs_handle"] = "valid-handle"
+
+    # No debe propagar la excepción, debe capturarla de forma resiliente
+    await adapter.heartbeat(task, visibility_timeout=30)
+    mock_client.change_message_visibility.assert_called_once()
+
+
+async def test_adapter_acknowledge_no_handle():
+    """Valida que si se intenta confirmar una tarea sin ReceiptHandle, se descarte sin llamadas a AWS SQS."""
+    adapter = SQSAioBotoAdapter(endpoint_url="http://mock", queue_url="http://queue")
+    mock_client = AsyncMock()
+    adapter._get_client = AsyncMock(return_value=mock_client)
+    
+    # Tarea sin ReceiptHandle en su contexto
+    task = ScrapingTask(
+        job_id="j", batch_id="b", task_id="t-01", url="https://x.com",
+        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
+    )
+    
+    await adapter.acknowledge(task)
+    # No debió realizar ninguna petición de borrado
+    mock_client.delete_message.assert_not_called()
+
+
+async def test_adapter_heartbeat_no_handle():
+    """Valida que si se intenta hacer heartbeat a una tarea sin ReceiptHandle, se descarte de forma segura."""
+    adapter = SQSAioBotoAdapter(endpoint_url="http://mock", queue_url="http://queue")
+    mock_client = AsyncMock()
+    adapter._get_client = AsyncMock(return_value=mock_client)
+    
+    task = ScrapingTask(
+        job_id="j", batch_id="b", task_id="t-01", url="https://x.com",
+        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
+    )
+    
+    await adapter.heartbeat(task, visibility_timeout=30)
+    mock_client.change_message_visibility.assert_not_called()

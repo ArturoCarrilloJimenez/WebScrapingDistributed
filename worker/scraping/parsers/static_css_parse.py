@@ -15,12 +15,12 @@ class StaticCSSParser(BaseParser):
         """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
         selectors = task.parser_config.get("selectors", {})
 
-        # Obtenemos o reutilizamos la sesión persistente del Pool
-        session = await self.network_client.get_session(str(task.url), task.context.get("sticky_session_id"))
-        self.log.info(
-            f"Infiltración TLS Keep-Alive activa. Descargando: {task.url} | Tarea ID: {task.task_id}")
-
         try:
+            # Obtenemos o reutilizamos la sesión persistente del Pool
+            session = await self.network_client.get_session(str(task.url), task.context.get("sticky_session_id"))
+            self.log.info(
+                f"Infiltración TLS Keep-Alive activa. Descargando: {task.url} | Tarea ID: {task.task_id}")
+
             response = await session.get(str(task.url), allow_redirects=True)
 
             if response.status_code == 404:

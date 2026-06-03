@@ -21,18 +21,34 @@ def get_task_consumer() -> BaseConsumer:
 
 def get_secure_network_client() -> SecureNetworkClient:
     if not settings.proxy_enabled:
-        return SecureNetworkClient(proxy_provider=None)
+        return SecureNetworkClient(
+            proxy_provider=None, 
+            max_pool_size=settings.proxy_max_pool_size, 
+            idle_timeout=settings.proxy_idle_timeout, 
+            max_requests_per_session=settings.proxy_max_requests_per_session, 
+            min_requests_per_session=settings.proxy_min_requests_per_session
+        )
 
     # Configuramos el proveedor de proxies según el modo seleccionado en la configuración
     if settings.proxy_mode == ProxyMode.STATIC_POOL:
         raw_list = settings.proxy_static_list or ""
         proxy_urls = [url.strip()
                       for url in raw_list.split(",") if url.strip()]
-        provider = StaticPoolProxyProvider(proxy_urls)
+        provider = StaticPoolProxyProvider(
+            proxy_urls=proxy_urls, 
+            check_interval=settings.proxy_static_check_interval, 
+            idle_threshold=settings.proxy_static_idle_threshold
+        )
     else:
         provider = BackconnectProxyProvider(settings.proxy_url or None)
 
-    return SecureNetworkClient(proxy_provider=provider)
+    return SecureNetworkClient(
+        proxy_provider=provider,
+        max_pool_size=settings.proxy_max_pool_size,
+        idle_timeout=settings.proxy_idle_timeout,
+        max_requests_per_session=settings.proxy_max_requests_per_session,
+        min_requests_per_session=settings.proxy_min_requests_per_session
+    )
 
 
 def get_parser_factory() -> ParserFactory:

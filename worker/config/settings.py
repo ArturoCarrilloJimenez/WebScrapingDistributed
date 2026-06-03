@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     proxy_static_list: str = ""  # Lista de proxies para el modo static_pool, separada por comas
     proxy_url: str = ""  # URL del proxy para el modo backconnect
 
+    # Nuevas variables de configuración para afinación y resiliencia del proxy/cliente
+    proxy_static_check_interval: float = 30.0
+    proxy_static_idle_threshold: float = 180.0
+    proxy_max_pool_size: int = 150
+    proxy_idle_timeout: float = 60.0
+    proxy_max_requests_per_session: int = 100
+    proxy_min_requests_per_session: int = 10
+
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(
         env_file=".env",

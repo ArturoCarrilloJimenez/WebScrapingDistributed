@@ -174,12 +174,18 @@ class SQSAioBotoAdapter(BaseConsumer):
                 {"task_id": task.task_id}
             )
             return
-        client = await self._get_client()
-        await client.change_message_visibility(
-            QueueUrl=self.queue_url,
-            ReceiptHandle=handle,
-            VisibilityTimeout=visibility_timeout
-        )
+        try:
+            client = await self._get_client()
+            await client.change_message_visibility(
+                QueueUrl=self.queue_url,
+                ReceiptHandle=handle,
+                VisibilityTimeout=visibility_timeout
+            )
+        except Exception as e:
+            log.error(
+                "Fallo al enviar heartbeat a SQS (cambiar visibilidad del mensaje).",
+                {"task_id": task.task_id, "exception": type(e).__name__, "error": str(e)}
+            )
 
     async def close(self) -> None:
         if self._client:
