@@ -18,7 +18,7 @@ def create_mock_client(status_code: int, html_text: str = ""):
     mock_session.get.return_value = mock_response
 
     mock_client = MagicMock()
-    mock_client.create_session.return_value.__aenter__.return_value = mock_session
+    mock_client.get_session = AsyncMock(return_value=mock_session)
     return mock_client
 
 

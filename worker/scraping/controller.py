@@ -45,11 +45,12 @@ class WorkerController:
 
                     # 1. ¿Tenemos capacidad? Si el semáforo está lleno, esperamos.
                     if slots_available <= 0:
-                        await asyncio.sleep(0.5)  # Pequeño respiro para la CPU
+                        # Esperamos a que alguna tarea termine para liberar espacio. Esto evita hacer fetch de tareas que no podremos procesar.
+                        await asyncio.wait(self._active_tasks, return_when=asyncio.FIRST_COMPLETED)
                         continue
 
-                    # 2. Fetch de tareas (Long Polling 20s configurado en el adaptador)
-                    tasks = await self.consumer.fetch(batch_size=min(slots_available, self.NUM_MAX_TASKS))
+                    # 2. Fetch de tareas (El adaptador se encargará de paralelizar internamente si slots_available > 10)
+                    tasks = await self.consumer.fetch(batch_size=slots_available)
 
                     for task in tasks:
                         # 3. Disparamos la ejecución sin bloquear el bucle principal
@@ -194,7 +195,7 @@ class WorkerController:
         # --- ERRORES RECUPERABLES (Gestión de reintentos) ---
         if task.retry_count >= task.max_retries:
             log.error(
-                f"Tarea {task.task_id} superó el máximo de reintentos ({task.retry_count}/{task.max_retries}) por [{category.value}]. Enviando a DLQ.")
+                f"Tarea {task.task_id} superó el máximo de reintentos ({task.retry_count}/{task.max_retries}) por [{category.value}]. Eliminando de la cola principal (descartada).")
             await self.ack_queue.put(task)
             return
 

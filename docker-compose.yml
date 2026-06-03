@@ -13,9 +13,6 @@ services:
       - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-    volumes:
-      - "./producer:/app"
-      - "./shared:/app/shared"
     depends_on:
       - emulator-aws
 
@@ -35,9 +32,6 @@ services:
       - PROXY_MODE=${PROXY_MODE}
       - PROXY_STATIC_LIST=${PROXY_STATIC_LIST}
       - PROXY_URL=${PROXY_URL}
-    volumes:
-      - "./worker:/app"
-      - "./shared:/app/shared"
     depends_on:
       - emulator-aws
       - producer

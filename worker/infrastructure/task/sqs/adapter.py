@@ -1,5 +1,6 @@
 from typing import List
 from botocore.config import Config
+import asyncio
 
 from shared.logging import Logger
 import aioboto3
@@ -39,6 +40,47 @@ class SQSAioBotoAdapter(BaseConsumer):
         return self._client
 
     async def fetch(self, batch_size: int = min(settings.num_max_tasks, 10)) -> List[ScrapingTask]:
+        # Si batch_size <= 10, lo hacemos de forma directa en una sola llamada
+        if batch_size <= 10:
+            return await self._fetch_single_batch(batch_size)
+
+        # Si batch_size > 10, dividimos en lotes concurrentes de máximo 10
+        fetch_sizes = []
+        remaining = batch_size
+        while remaining > 0:
+            size = min(remaining, 10)
+            fetch_sizes.append(size)
+            remaining -= size
+
+        # Limitamos a un máximo de 10 peticiones concurrentes para evitar saturar sockets
+        fetch_sizes = fetch_sizes[:10]
+
+        fetch_tasks = [asyncio.create_task(self._fetch_single_batch(size)) for size in fetch_sizes]
+        pending = set(fetch_tasks)
+        tasks = []
+
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            found_any = False
+            for fut in done:
+                try:
+                    res = fut.result()
+                    if res:
+                        tasks.extend(res)
+                        found_any = True
+                except Exception as e:
+                    log.error(f"Error en llamada paralela de fetch en SQS Adapter: {str(e)}")
+
+            # Si ya conseguimos tareas en alguna de las peticiones paralelas,
+            # cancelamos las restantes inmediatamente para no retrasar el procesamiento.
+            if found_any:
+                for p in pending:
+                    p.cancel()
+                break
+
+        return tasks
+
+    async def _fetch_single_batch(self, batch_size: int) -> List[ScrapingTask]:
         client = await self._get_client()
 
         response = await client.receive_message(

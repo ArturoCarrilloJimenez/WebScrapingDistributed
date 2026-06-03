@@ -22,4 +22,5 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "moto[server,sqs]",
+    "flask>=3.1.3",
 ]
