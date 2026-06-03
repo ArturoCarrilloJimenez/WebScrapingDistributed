@@ -28,6 +28,11 @@ class WorkerController:
         # Variable para almacenar la tarea principal del bucle de ejecución, útil para cancelarla desde el manejador de señales
         self._main_task = None
 
+        # Variables de control para Polling Dinámico y Backoff Corto
+        self.current_backoff = 0.0
+        self.max_backoff = 10.0  # Techo de 10 segundos para no demorar el inicio de lotes de URLs
+        self.backoff_step = 2.0
+
     async def run(self):
         """Punto de entrada principal (El bucle infinito)"""
         # Guarda el puntero de la tarea actual
@@ -49,11 +54,25 @@ class WorkerController:
                         await asyncio.wait(self._active_tasks, return_when=asyncio.FIRST_COMPLETED)
                         continue
 
-                    # 2. Fetch de tareas (El adaptador se encargará de paralelizar internamente si slots_available > 10)
-                    tasks = await self.consumer.fetch(batch_size=slots_available)
+                    # 2. Determinar tamaño de lote dinámico (10 si estamos en backoff/vacío, o slots completos)
+                    batch_size = 10 if self.current_backoff > 0 else slots_available
+
+                    # 3. Aplicar micro-backoff si la cola estaba vacía en el ciclo anterior
+                    if self.current_backoff > 0:
+                        await asyncio.sleep(self.current_backoff)
+
+                    # 4. Fetch de tareas
+                    tasks = await self.consumer.fetch(batch_size=batch_size)
+
+                    if not tasks:
+                        # Incrementar el backoff si no hay tareas
+                        self.current_backoff = min(self.current_backoff + self.backoff_step, self.max_backoff)
+                    else:
+                        # Reiniciar de inmediato si hay tareas para procesar a máxima velocidad
+                        self.current_backoff = 0.0
 
                     for task in tasks:
-                        # 3. Disparamos la ejecución sin bloquear el bucle principal
+                        # 5. Disparamos la ejecución sin bloquear el bucle principal
                         t = asyncio.create_task(self._process_task_wrapper(task))
                         self._active_tasks.add(t)
                         t.add_done_callback(self._active_tasks.discard)
