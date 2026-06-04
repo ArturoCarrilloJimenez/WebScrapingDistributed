@@ -22,7 +22,7 @@ COPY producer/pyproject.toml ./producer/
 COPY worker/pyproject.toml ./worker/
 
 RUN --mount=type=cache,target=/tmp/.uv-cache \
-    uv sync --frozen --no-build --no-install-workspace
+    uv sync --frozen --no-build --no-install-workspace --package worker
 
 # =========================================================
 # FASE 2: Inyección de Código y Ejecución
@@ -42,5 +42,5 @@ ENV PYTHONPATH="/app/shared"
 # CORRECCIÓN DE CONTEXTO: Nos movemos a la carpeta real del servicio
 WORKDIR /app/worker
 
-# Ejecución nativa a través del motor de uv
-CMD ["uv", "run", "python", "main.py"]
+# Ejecución
+CMD ["/app/.venv/bin/python", "main.py"]

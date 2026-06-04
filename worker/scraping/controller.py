@@ -33,83 +33,73 @@ class WorkerController:
         self.max_backoff = 10.0  # Techo de 10 segundos para no demorar el inicio de lotes de URLs
         self.backoff_step = 2.0
 
-    async def run(self):
-        """Punto de entrada principal (El bucle infinito)"""
-        # Guarda el puntero de la tarea actual
+    async def _run_cycle(self) -> None:
+        """Maneja la lógica de un único ciclo de ejecución: capacidad, backoff y despacho."""
+        slots_available = self.max_concurrency - len(self._active_tasks)
+
+        # 1. Control de capacidad
+        if slots_available <= 0:
+            await asyncio.wait(self._active_tasks, return_when=asyncio.FIRST_COMPLETED)
+            return
+
+        # 2. Configuración de lote dinámico y micro-backoff
+        batch_size = 10 if self.current_backoff > 0 else slots_available
+        if self.current_backoff > 0:
+            await asyncio.sleep(self.current_backoff)
+
+        # 3. Consumo y ajuste dinámico de polling
+        tasks = await self.consumer.fetch(batch_size=batch_size)
+        if not tasks:
+            self.current_backoff = min(self.current_backoff + self.backoff_step, self.max_backoff)
+        else:
+            self.current_backoff = 0.0
+
+        # 4. Despacho concurrente de tareas
+        for task in tasks:
+            t = asyncio.create_task(self._process_task_wrapper(task))
+            self._active_tasks.add(t)
+            t.add_done_callback(self._active_tasks.discard)
+
+    async def _execute_shutdown(self) -> None:
+        """Protocolo seguro y ordenado para liberar recursos y esperar tareas en vuelo."""
+        log.warning("=== INICIANDO PROTOCOLO DE APAGADO SEGURO (FINALLY) ===")
+        self.running = False
+
+        # PASO 1: Esperar tareas de scraping activas
+        if self._active_tasks:
+            log.info(f"Esperando la finalización de {len(self._active_tasks)} tareas activas de scraping...")
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            log.info("Todas las tareas de scraping en vuelo han terminado.")
+
+        # PASO 2: Vaciar flusher asíncrono de ACKs
+        if self._ack_flusher_task:
+            log.info("Esperando a que el flusher asíncrono vacíe la cola de ACKs en memoria...")
+            await self._ack_flusher_task
+
+        # PASO 3: Cierre de sockets
+        log.info("Cerrando sockets y conexiones con el broker SQS...")
+
+    async def run(self) -> None:
+        """Punto de entrada principal (El bucle infinito). Flujo plano y legible."""
         self._main_task = asyncio.current_task()
-
-        log.info(
-            f"Engine arrancado. Concurrencia máx: {self.semaphore._value}")
-
-        # Iniciamos el flusher en segundo plano
+        log.info(f"Engine arrancado. Concurrencia máx: {self.semaphore._value}")
+        
         self._ack_flusher_task = asyncio.create_task(self._ack_flusher())
+
         try:
             while self.running:
                 try:
-                    slots_available = self.max_concurrency - len(self._active_tasks)
-
-                    # 1. ¿Tenemos capacidad? Si el semáforo está lleno, esperamos.
-                    if slots_available <= 0:
-                        # Esperamos a que alguna tarea termine para liberar espacio. Esto evita hacer fetch de tareas que no podremos procesar.
-                        await asyncio.wait(self._active_tasks, return_when=asyncio.FIRST_COMPLETED)
-                        continue
-
-                    # 2. Determinar tamaño de lote dinámico (10 si estamos en backoff/vacío, o slots completos)
-                    batch_size = 10 if self.current_backoff > 0 else slots_available
-
-                    # 3. Aplicar micro-backoff si la cola estaba vacía en el ciclo anterior
-                    if self.current_backoff > 0:
-                        await asyncio.sleep(self.current_backoff)
-
-                    # 4. Fetch de tareas
-                    tasks = await self.consumer.fetch(batch_size=batch_size)
-
-                    if not tasks:
-                        # Incrementar el backoff si no hay tareas
-                        self.current_backoff = min(self.current_backoff + self.backoff_step, self.max_backoff)
-                    else:
-                        # Reiniciar de inmediato si hay tareas para procesar a máxima velocidad
-                        self.current_backoff = 0.0
-
-                    for task in tasks:
-                        # 5. Disparamos la ejecución sin bloquear el bucle principal
-                        t = asyncio.create_task(self._process_task_wrapper(task))
-                        self._active_tasks.add(t)
-                        t.add_done_callback(self._active_tasks.discard)
-
+                    await self._run_cycle()
                 except asyncio.CancelledError:
-                        # Si cancelamos desde stop(), propagamos el error para salir del while
-                        raise
+                    raise  # Propagamos para romper el bucle while limpiamente
                 except Exception as e:
                     log.error(f"Error crítico en el loop del Engine: {str(e)}")
                     await asyncio.sleep(5)  # Evitar bucle de errores infinito
-                    
         except asyncio.CancelledError:
             log.warning("Bucle de ejecución interrumpido por señal de apagado del sistema.")
             raise
-
         finally:
-            log.warning("=== INICIANDO PROTOCOLO DE APAGADO SEGURO (FINALLY) ===")
-            # Si estamos en Windows y 'stop()' no se ejecutó, esto avisa al flusher de inmediato.
-            self.running = False
-
-            # PASO 1: Esperar a que las tareas de scraping en vuelo terminen de procesarse.
-            if self._active_tasks:
-                log.info(f"Esperando la finalización de {len(self._active_tasks)} tareas activas de scraping...")
-                
-                await asyncio.gather(*self._active_tasks, return_exceptions=True)
-                log.info("Todas las tareas de scraping en vuelo han terminado.")
-
-            # PASO 2: Esperar a que el flusher termine de procesar los ACKs restantes.
-            if self._ack_flusher_task:
-                log.info("Esperando a que el flusher asíncrono vacíe la cola de ACKs en memoria...")
-                await self._ack_flusher_task
-
-            # PASO 3: Cerrar conexiones con el broker y limpiar recursos.
-            log.info("Cerrando sockets y conexiones con el broker SQS...")
-            await self.consumer.close()
-                
-            log.warning("=== WORKER ENGINE APAGADO LIMPIAMENTE ===")
+            await self._execute_shutdown()
 
     async def _process_task_wrapper(self, task: ScrapingTask):
         """Envoltorio para gestionar el semáforo y el ciclo de vida"""

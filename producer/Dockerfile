@@ -26,7 +26,7 @@ COPY worker/pyproject.toml ./worker/
 # 2. INSTALACIÓN ESTRICTA (Luz verde en SonarQube)
 # Añadimos --mount=type=cache para que la caché de root no se herede en la imagen final
 RUN --mount=type=cache,target=/tmp/.uv-cache \
-    uv sync --frozen --no-build --no-install-workspace
+    uv sync --frozen --no-build --no-install-workspace --package producer
 
 # =========================================================
 # FASE 2: Inyección de Código y Ejecución
@@ -49,4 +49,4 @@ WORKDIR /app/producer
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
