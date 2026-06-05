@@ -31,7 +31,8 @@ class StaticPoolProxyProvider(BaseProxyProvider):
         try:
             loop = asyncio.get_running_loop()
             if not self._monitor_task or self._monitor_task.done():
-                self._monitor_task = loop.create_task(self._health_check_loop())
+                self._monitor_task = loop.create_task(
+                    self._health_check_loop())
         except RuntimeError:
             pass
 
@@ -57,10 +58,14 @@ class StaticPoolProxyProvider(BaseProxyProvider):
         return url
 
     async def _ping_proxy(self, proxy_url: str) -> bool:
-        """Chequeo de red rápido contra un endpoint ligero (204 No Content)."""
+        """
+        Chequeo de red rápido contra un endpoint ligero (204 No Content).
+        Usamos HTTPS para garantizar que el proxy soporta túneles SSL (CONNECT).
+        """
         try:
             async with AsyncSession(proxy=proxy_url, timeout=5.0) as session:
-                response = await session.get("http://www.gstatic.com/generate_204", allow_redirects=False)
+                response = await session.get("https://www.gstatic.com/generate_204", allow_redirects=False)
+
                 if response.status_code == 204 or (200 <= response.status_code < 400):
                     return True
         except Exception:
@@ -74,7 +79,8 @@ class StaticPoolProxyProvider(BaseProxyProvider):
             # Si superamos el tiempo límite sin peticiones, suspendemos los pings
             if time.time() - self._last_request_time > self.idle_threshold:
                 if not self._is_sleeping:
-                    log.warning("Inactividad de peticiones detectada. Suspendiendo pings de proxies para ahorrar ancho de banda.")
+                    log.warning(
+                        "Inactividad de peticiones detectada. Suspendiendo pings de proxies para ahorrar ancho de banda.")
                     self._is_sleeping = True
                 await asyncio.sleep(5.0)
                 continue
@@ -92,7 +98,8 @@ class StaticPoolProxyProvider(BaseProxyProvider):
             if active:
                 self.proxy_urls_active = active
             else:
-                log.warning("Todos los proxies fallaron el chequeo de salud. Usando fallback de lista completa.")
+                log.warning(
+                    "Todos los proxies fallaron el chequeo de salud. Usando fallback de lista completa.")
                 self.proxy_urls_active = list(self.proxy_urls_all)
 
             await asyncio.sleep(self.check_interval)

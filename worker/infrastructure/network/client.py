@@ -1,4 +1,4 @@
-import random
+import secrets
 
 from curl_cffi.requests import AsyncSession
 from urllib.parse import urlparse
@@ -80,11 +80,14 @@ class SecureNetworkClient:
             # Inicializar la sesión explícitamente para abrir recursos de curl en C
             await session.__aenter__()
 
+            rango_peticiones = (self.max_requests_per_session - self.min_requests_per_session) + 1
+            limite_aleatorio = self.min_requests_per_session + secrets.randbelow(rango_peticiones)
+
             self._pool[key] = {
                 "session": session,
                 "last_used": now,
                 "request_count": 0,
-                "limit": random.randint(self.min_requests_per_session, self.max_requests_per_session)
+                "limit": limite_aleatorio
             }
 
             log.info(
