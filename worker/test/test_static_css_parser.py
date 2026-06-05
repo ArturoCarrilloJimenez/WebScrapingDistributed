@@ -18,7 +18,7 @@ def create_mock_client(status_code: int, html_text: str = ""):
     mock_session.get.return_value = mock_response
 
     mock_client = MagicMock()
-    mock_client.create_session.return_value.__aenter__.return_value = mock_session
+    mock_client.get_session = AsyncMock(return_value=mock_session)
     return mock_client
 
 
@@ -79,3 +79,23 @@ async def test_parser_invalid_schema_exception():
     with pytest.raises(ScrapingError) as exc_info:
         await parser.parse(task)
     assert exc_info.value.category == ErrorCategory.INVALID_SCHEMA
+
+
+async def test_parser_unexpected_exception_translation():
+    """Valida que cualquier excepción inesperada se convierta en un SERVER_ERROR."""
+    client = MagicMock()
+    # Forzamos que get_session lance un error inesperado no controlado
+    client.get_session.side_effect = AttributeError("Unexpected None object")
+    parser = StaticCSSParser(network_client=client)
+
+    task = ScrapingTask(
+        job_id="j_01", batch_id="b_01", task_id="t_01",
+        url="https://example.com", parser_type="static_css",
+        parser_config={"selectors": {"headline": "h1.title"}},
+        retry_count=0, max_retries=3
+    )
+
+    with pytest.raises(ScrapingError) as exc_info:
+        await parser.parse(task)
+    assert exc_info.value.category == ErrorCategory.SERVER_ERROR
+    assert "Unexpected None object" in exc_info.value.original_error

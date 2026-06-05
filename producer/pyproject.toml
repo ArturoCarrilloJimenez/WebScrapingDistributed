@@ -10,9 +10,6 @@ dependencies = [
     "shared",
 ]
 
-[tool.uv.sources]
-shared = { path = "../shared" }
-
 [dependency-groups]
 dev = [
     "httpx",

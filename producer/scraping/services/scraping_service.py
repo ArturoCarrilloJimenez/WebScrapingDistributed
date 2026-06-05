@@ -77,9 +77,11 @@ class ScrapingOrchestrator:
             mapper(), sender()
         )  # Realizamos el procesaminto en parelelo
 
-        log.info("Obtenemos la respuesta", results)
+        merged_report = self._merge_reports(results[1], request.job_id, len(tasks))
 
-        return self._merge_reports(results[1], request.job_id, len(tasks))
+        log.info("Obtenemos la respuesta", merged_report)
+
+        return merged_report
 
     def _merge_reports(
         self, reports: List[BatchResponse], job_id: str, total: int

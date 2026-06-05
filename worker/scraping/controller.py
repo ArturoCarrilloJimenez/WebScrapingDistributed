@@ -28,68 +28,78 @@ class WorkerController:
         # Variable para almacenar la tarea principal del bucle de ejecución, útil para cancelarla desde el manejador de señales
         self._main_task = None
 
-    async def run(self):
-        """Punto de entrada principal (El bucle infinito)"""
-        # Guarda el puntero de la tarea actual
+        # Variables de control para Polling Dinámico y Backoff Corto
+        self.current_backoff = 0.0
+        self.max_backoff = 10.0  # Techo de 10 segundos para no demorar el inicio de lotes de URLs
+        self.backoff_step = 2.0
+
+    async def _run_cycle(self) -> None:
+        """Maneja la lógica de un único ciclo de ejecución: capacidad, backoff y despacho."""
+        slots_available = self.max_concurrency - len(self._active_tasks)
+
+        # 1. Control de capacidad
+        if slots_available <= 0:
+            await asyncio.wait(self._active_tasks, return_when=asyncio.FIRST_COMPLETED)
+            return
+
+        # 2. Configuración de lote dinámico y micro-backoff
+        batch_size = 10 if self.current_backoff > 0 else slots_available
+        if self.current_backoff > 0:
+            await asyncio.sleep(self.current_backoff)
+
+        # 3. Consumo y ajuste dinámico de polling
+        tasks = await self.consumer.fetch(batch_size=batch_size)
+        if not tasks:
+            self.current_backoff = min(self.current_backoff + self.backoff_step, self.max_backoff)
+        else:
+            self.current_backoff = 0.0
+
+        # 4. Despacho concurrente de tareas
+        for task in tasks:
+            t = asyncio.create_task(self._process_task_wrapper(task))
+            self._active_tasks.add(t)
+            t.add_done_callback(self._active_tasks.discard)
+
+    async def _execute_shutdown(self) -> None:
+        """Protocolo seguro y ordenado para liberar recursos y esperar tareas en vuelo."""
+        log.warning("=== INICIANDO PROTOCOLO DE APAGADO SEGURO (FINALLY) ===")
+        self.running = False
+
+        # PASO 1: Esperar tareas de scraping activas
+        if self._active_tasks:
+            log.info(f"Esperando la finalización de {len(self._active_tasks)} tareas activas de scraping...")
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            log.info("Todas las tareas de scraping en vuelo han terminado.")
+
+        # PASO 2: Vaciar flusher asíncrono de ACKs
+        if self._ack_flusher_task:
+            log.info("Esperando a que el flusher asíncrono vacíe la cola de ACKs en memoria...")
+            await self._ack_flusher_task
+
+        # PASO 3: Cierre de sockets
+        log.info("Cerrando sockets y conexiones con el broker SQS...")
+
+    async def run(self) -> None:
+        """Punto de entrada principal (El bucle infinito). Flujo plano y legible."""
         self._main_task = asyncio.current_task()
-
-        log.info(
-            f"Engine arrancado. Concurrencia máx: {self.semaphore._value}")
-
-        # Iniciamos el flusher en segundo plano
+        log.info(f"Engine arrancado. Concurrencia máx: {self.semaphore._value}")
+        
         self._ack_flusher_task = asyncio.create_task(self._ack_flusher())
+
         try:
             while self.running:
                 try:
-                    slots_available = self.max_concurrency - len(self._active_tasks)
-
-                    # 1. ¿Tenemos capacidad? Si el semáforo está lleno, esperamos.
-                    if slots_available <= 0:
-                        await asyncio.sleep(0.5)  # Pequeño respiro para la CPU
-                        continue
-
-                    # 2. Fetch de tareas (Long Polling 20s configurado en el adaptador)
-                    tasks = await self.consumer.fetch(batch_size=min(slots_available, self.NUM_MAX_TASKS))
-
-                    for task in tasks:
-                        # 3. Disparamos la ejecución sin bloquear el bucle principal
-                        t = asyncio.create_task(self._process_task_wrapper(task))
-                        self._active_tasks.add(t)
-                        t.add_done_callback(self._active_tasks.discard)
-
+                    await self._run_cycle()
                 except asyncio.CancelledError:
-                        # Si cancelamos desde stop(), propagamos el error para salir del while
-                        raise
+                    raise  # Propagamos para romper el bucle while limpiamente
                 except Exception as e:
                     log.error(f"Error crítico en el loop del Engine: {str(e)}")
                     await asyncio.sleep(5)  # Evitar bucle de errores infinito
-                    
         except asyncio.CancelledError:
             log.warning("Bucle de ejecución interrumpido por señal de apagado del sistema.")
             raise
-
         finally:
-            log.warning("=== INICIANDO PROTOCOLO DE APAGADO SEGURO (FINALLY) ===")
-            # Si estamos en Windows y 'stop()' no se ejecutó, esto avisa al flusher de inmediato.
-            self.running = False
-
-            # PASO 1: Esperar a que las tareas de scraping en vuelo terminen de procesarse.
-            if self._active_tasks:
-                log.info(f"Esperando la finalización de {len(self._active_tasks)} tareas activas de scraping...")
-                
-                await asyncio.gather(*self._active_tasks, return_exceptions=True)
-                log.info("Todas las tareas de scraping en vuelo han terminado.")
-
-            # PASO 2: Esperar a que el flusher termine de procesar los ACKs restantes.
-            if self._ack_flusher_task:
-                log.info("Esperando a que el flusher asíncrono vacíe la cola de ACKs en memoria...")
-                await self._ack_flusher_task
-
-            # PASO 3: Cerrar conexiones con el broker y limpiar recursos.
-            log.info("Cerrando sockets y conexiones con el broker SQS...")
-            await self.consumer.close()
-                
-            log.warning("=== WORKER ENGINE APAGADO LIMPIAMENTE ===")
+            await self._execute_shutdown()
 
     async def _process_task_wrapper(self, task: ScrapingTask):
         """Envoltorio para gestionar el semáforo y el ciclo de vida"""
@@ -194,7 +204,7 @@ class WorkerController:
         # --- ERRORES RECUPERABLES (Gestión de reintentos) ---
         if task.retry_count >= task.max_retries:
             log.error(
-                f"Tarea {task.task_id} superó el máximo de reintentos ({task.retry_count}/{task.max_retries}) por [{category.value}]. Enviando a DLQ.")
+                f"Tarea {task.task_id} superó el máximo de reintentos ({task.retry_count}/{task.max_retries}) por [{category.value}]. Eliminando de la cola principal (descartada).")
             await self.ack_queue.put(task)
             return
 

@@ -61,9 +61,13 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     # Guardamos el estado original de los Singletons para el Teardown
     original_queue_url = settings.sqs_queue_url
     original_adapter_instance = worker_deps._adapter_sqs_instance
+    original_aws_key = settings.aws_access_key_id
+    original_aws_secret = settings.aws_secret_access_key
 
-    # Forzamos la configuración del test hacia la cola dinámica de Moto
+    # Forzamos la configuración del test hacia la cola dinámica de Moto y sus credenciales
     settings.sqs_queue_url = queue_url
+    settings.aws_access_key_id = "testing"
+    settings.aws_secret_access_key = "testing"
 
     # Instanciamos el adaptador asíncrono apuntando directamente al endpoint HTTP de Moto
     mocked_adapter = SQSAioBotoAdapter(
@@ -80,6 +84,8 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     # Clean State: Restauración absoluta para evitar contaminación de memoria en la suite
     settings.sqs_queue_url = original_queue_url
     worker_deps._adapter_sqs_instance = original_adapter_instance
+    settings.aws_access_key_id = original_aws_key
+    settings.aws_secret_access_key = original_aws_secret
 
 
 @pytest.fixture(scope="function")

@@ -5,6 +5,7 @@ from dependencies import get_worker_controller
 
 log = Logger("Worker Main")
 
+
 async def main():
     # Obtenemos el controlador configurado desde el proveedor de dependencias
     controller = get_worker_controller()
@@ -12,15 +13,15 @@ async def main():
     loop = asyncio.get_running_loop()
 
     log.info("Arrancando Worker en modo funcional...")
-    
+
     # Esta función se ejecutará inmediatamente cuando alguien pulse Ctrl+C o Docker pare el contenedor
     def trigger_shutdown():
         # Creamos la tarea
         task = asyncio.create_task(controller.stop())
-        
+
         # La añadimos al set para mantener una referencia fuerte
         background_tasks.add(task)
-        
+
         # Nos aseguramos de eliminar la referencia cuando la tarea termine
         task.add_done_callback(background_tasks.discard)
 
@@ -38,4 +39,7 @@ async def main():
         log.error(f"Error fatal: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.info("Worker detenido por señal de interrupción.")

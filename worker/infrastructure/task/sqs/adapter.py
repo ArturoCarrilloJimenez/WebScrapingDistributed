@@ -1,5 +1,6 @@
-from typing import List
+from typing import List, Tuple
 from botocore.config import Config
+import asyncio
 
 from shared.logging import Logger
 import aioboto3
@@ -38,7 +39,58 @@ class SQSAioBotoAdapter(BaseConsumer):
             ).__aenter__()
         return self._client
 
+    def _calculate_fetch_sizes(self, batch_size: int) -> List[int]:
+        """Calcula los tamaños de los lotes usando matemática estática para evitar bucles."""
+        full_batches = batch_size // 10
+        remainder = batch_size % 10
+        sizes = [10] * full_batches
+        if remainder > 0:
+            sizes.append(remainder)
+        return sizes[:10]  # Limitación original a un máximo de 10 peticiones
+
+    def _process_done_tasks(self, done: set) -> Tuple[List[ScrapingTask], bool]:
+        """Aísla el procesamiento de tareas completadas y la captura de excepciones."""
+        tasks = []
+        found_any = False
+        for fut in done:
+            try:
+                res = fut.result()
+                if res:
+                    tasks.extend(res)
+                    found_any = True
+            except Exception as e:
+                log.error(
+                    f"Error en llamada paralela de fetch en SQS Adapter: {str(e)}")
+        return tasks, found_any
+
+    async def _fetch_concurrently(self, fetch_sizes: List[int]) -> List[ScrapingTask]:
+        """Orquesta la concurrencia y maneja la cancelación por cortocircuito."""
+        fetch_tasks = [asyncio.create_task(
+            self._fetch_single_batch(size)) for size in fetch_sizes]
+        pending = set(fetch_tasks)
+        all_tasks = []
+
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            tasks, found_any = self._process_done_tasks(done)
+            all_tasks.extend(tasks)
+
+            if found_any:
+                for p in pending:
+                    p.cancel()
+                break
+
+        return all_tasks
+
     async def fetch(self, batch_size: int = min(settings.num_max_tasks, 10)) -> List[ScrapingTask]:
+        """Método principal de entrada. Flujo lineal impecable."""
+        if batch_size <= 10:
+            return await self._fetch_single_batch(batch_size)
+
+        fetch_sizes = self._calculate_fetch_sizes(batch_size)
+        return await self._fetch_concurrently(fetch_sizes)
+
+    async def _fetch_single_batch(self, batch_size: int) -> List[ScrapingTask]:
         client = await self._get_client()
 
         response = await client.receive_message(
@@ -58,7 +110,8 @@ class SQSAioBotoAdapter(BaseConsumer):
                 # Obtenemos el número de intentos desde los atributos del mensaje para gestionar reintentos
                 # Debemos de hacerlo de esta forma porque SQS no reenvía el mismo mensaje con un contador de reintentos actualizado, sino que es el consumidor quien debe inferirlo a partir de los atributos del mensaje.
                 attributes = msg.get("Attributes", {})
-                approximate_receive_count = int(attributes.get("ApproximateReceiveCount", 1))
+                approximate_receive_count = int(
+                    attributes.get("ApproximateReceiveCount", 1))
 
                 task.retry_count = approximate_receive_count - 1
 
@@ -100,7 +153,7 @@ class SQSAioBotoAdapter(BaseConsumer):
 
         client = await self._get_client()
         entries = []
-        
+
         for task in tasks:
             handle = task.context.get("_sqs_handle")
             if handle:
@@ -116,7 +169,7 @@ class SQSAioBotoAdapter(BaseConsumer):
                     QueueUrl=self.queue_url,
                     Entries=chunk
                 )
-                
+
                 # Validar si SQS rechazó el borrado de algún mensaje de forma interna
                 if response.get("Failed"):
                     log.error(
@@ -132,12 +185,19 @@ class SQSAioBotoAdapter(BaseConsumer):
                 {"task_id": task.task_id}
             )
             return
-        client = await self._get_client()
-        await client.change_message_visibility(
-            QueueUrl=self.queue_url,
-            ReceiptHandle=handle,
-            VisibilityTimeout=visibility_timeout
-        )
+        try:
+            client = await self._get_client()
+            await client.change_message_visibility(
+                QueueUrl=self.queue_url,
+                ReceiptHandle=handle,
+                VisibilityTimeout=visibility_timeout
+            )
+        except Exception as e:
+            log.error(
+                "Fallo al enviar heartbeat a SQS (cambiar visibilidad del mensaje).",
+                {"task_id": task.task_id, "exception": type(
+                    e).__name__, "error": str(e)}
+            )
 
     async def close(self) -> None:
         if self._client:

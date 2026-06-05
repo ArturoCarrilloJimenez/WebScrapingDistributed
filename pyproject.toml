@@ -1,0 +1,12 @@
+[project]
+name = "ScrapingDistributed"
+version = "0.1.0"
+description = "Distributed web scraping application with producer-consumer architecture"
+readme = "README.md"
+requires-python = ">=3.13"
+
+[tool.uv.sources]
+shared = { workspace = true }
+
+[tool.uv.workspace]
+members = ["shared", "producer", "worker"]

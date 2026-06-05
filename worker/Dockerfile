@@ -1,30 +1,46 @@
 FROM python:3.13-slim
+
+# Copiamos uv directamente desde la imagen oficial de Rust/Astral
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Optimizaciones de entorno de producción para Python y uv
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_COMPILE_BYTECODE=1
+    UV_COMPILE_BYTECODE=1 \
+    UV_NO_DEV=1 \
+    UV_CACHE_DIR="/tmp/.uv-cache"
 
-# 1. Definimos la base
-WORKDIR /usr/src/app
+WORKDIR /app
 
-RUN groupadd --system appgroup && useradd --system -g appgroup appuser
+# =========================================================
+# FASE 1: Mapeo del Workspace y Caché de Internet
+# =========================================================
 
-# 2. Copiamos shared a /usr/src/app/shared
+COPY pyproject.toml uv.lock ./
+COPY shared/pyproject.toml ./shared/
+COPY producer/pyproject.toml ./producer/
+COPY worker/pyproject.toml ./worker/
+
+RUN --mount=type=cache,target=/tmp/.uv-cache \
+    uv sync --frozen --no-build --no-install-workspace --package worker
+
+# =========================================================
+# FASE 2: Inyección de Código y Ejecución
+# =========================================================
+
 COPY shared/ ./shared/
-
-# 3. Copiamos worker a /usr/src/app/worker
 COPY worker/ ./worker/
 
-# 4. Entramos al proyecto
-WORKDIR /usr/src/app/worker
+RUN groupadd --system appgroup && useradd --system -g appgroup appuser \
+    && chown -R appuser:appgroup /app
 
-# 5. Instalamos
-RUN --frozen --no-dev --no-build \
-    && chown -R appuser:appgroup /usr/src/app
-    
 USER appuser
 
-ENV PATH="/usr/src/app/worker/.venv/bin:$PATH"
-# 5. Ejecución
-CMD ["python", "main.py"]
+# Enlace de arquitectura: Permite que el worker localice la librería shared
+ENV PYTHONPATH="/app/shared"
+
+# CORRECCIÓN DE CONTEXTO: Nos movemos a la carpeta real del servicio
+WORKDIR /app/worker
+
+# Ejecución
+CMD ["/app/.venv/bin/python", "main.py"]
