@@ -82,6 +82,10 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     yield client
 
     # Clean State: Restauración absoluta para evitar contaminación de memoria en la suite
+    try:
+        client.delete_queue(QueueUrl=queue_url)
+    except Exception:
+        pass
     settings.sqs_queue_url = original_queue_url
     worker_deps._adapter_sqs_instance = original_adapter_instance
     settings.aws_access_key_id = original_aws_key
@@ -91,4 +95,7 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
 @pytest.fixture(scope="function")
 def worker_controller(sqs_mock):
     """Proporciona el controlador configurado contra la infraestructura local."""
-    return worker_deps.get_worker_controller()
+    worker_deps._job_buffer_service_instance = None
+    controller = worker_deps.get_worker_controller()
+    yield controller
+    worker_deps._job_buffer_service_instance = None

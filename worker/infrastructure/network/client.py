@@ -11,13 +11,13 @@ log = Logger("Network Client Pool")
 
 
 class SecureNetworkClient:
-    def __init__(self, proxy_provider: BaseProxyProvider = None, max_pool_size: int = 150, idle_timeout: float = 60.0, max_requests_per_session: int = 100, min_requests_per_session: int = 10):
+    def __init__(self, proxy_provider: BaseProxyProvider = None, max_pool_size: int = 150, idle_timeout: float = 60.0, max_requests_per_session: int = 100, min_requests_per_session: int = 10, client_timeout: float = 15.0):
         self.proxy_provider = proxy_provider
         self.max_pool_size = max_pool_size
         self.idle_timeout = idle_timeout
         self.max_requests_per_session = max_requests_per_session
         self.min_requests_per_session = min_requests_per_session
-
+        self.client_timeout = client_timeout
         self._pool = {}
         self._lock = asyncio.Lock()
         self._cleanup_task = None
@@ -30,6 +30,19 @@ class SecureNetworkClient:
             "Referer": f"{parsed_url.scheme}://{parsed_url.netloc}/",
             "Cache-Control": "max-age=0",
         }
+
+    async def _close_session_with_grace(self, session: AsyncSession, domain: str, delay: float = 15.0):
+        """
+        Cierra la sesión después de un período de gracia para permitir que las conexiones actuales terminen sin interrupciones abruptas.
+        """
+        await asyncio.sleep(delay)
+        try:
+            await session.__aexit__(None, None, None)
+            log.info(
+                f"Sesión antigua/rotada para {domain} cerrada con éxito tras período de gracia.")
+        except Exception as e:
+            log.error(
+                f"Error al cerrar sesión rotada en segundo plano para {domain}: {e}")
 
     async def get_session(self, target_url: str, sticky_session_id: str = None) -> AsyncSession:
         parsed_url = urlparse(target_url)
@@ -56,13 +69,15 @@ class SecureNetworkClient:
                         f"Sesión para {domain} superó su límite dinámico de {entry['limit']} peticiones. "
                         f"Cerrando socket para romper patrón de IP y forzar rotación en proxy."
                     )
-                    try:
-                        await entry["session"].__aexit__(None, None, None)
-                    except Exception as e:
-                        log.error(f"Error al cerrar sesión para rotación: {e}")
-                    del self._pool[key]
+
+                    self._pool.pop(key, None)
+                    session_close = asyncio.create_task(self._close_session_with_grace(
+                        entry["session"], domain, self.client_timeout + 5.0))
+                    session_close.add_done_callback(lambda fut: log.info(
+                        f"Sesión para {domain} cerrada tras rotación."))
                 else:
-                    log.info(f"Reutilizando sesión existente para dominio: {domain} | Proxy: {proxy_string} | Sticky ID: {sticky_session_id} | Request Count: {entry['request_count']}/{entry['limit']}")
+                    log.info(
+                        f"Reutilizando sesión existente para dominio: {domain} | Proxy: {proxy_string} | Sticky ID: {sticky_session_id} | Request Count: {entry['request_count']}/{entry['limit']}")
                     return entry["session"]
 
             # 2. Desalojo si el pool está lleno (LRU básico)
@@ -73,20 +88,22 @@ class SecureNetworkClient:
             headers = self._generate_contextual_headers(target_url)
             session = AsyncSession(
                 impersonate="chrome",
-                timeout=15.0,
+                timeout=self.client_timeout,
                 headers=headers,
                 proxy=proxy_string
             )
             # Inicializar la sesión explícitamente para abrir recursos de curl en C
             await session.__aenter__()
 
-            rango_peticiones = (self.max_requests_per_session - self.min_requests_per_session) + 1
-            limite_aleatorio = self.min_requests_per_session + secrets.randbelow(rango_peticiones)
+            rango_peticiones = (self.max_requests_per_session -
+                                self.min_requests_per_session) + 1
+            limite_aleatorio = self.min_requests_per_session + \
+                secrets.randbelow(rango_peticiones)
 
             self._pool[key] = {
                 "session": session,
                 "last_used": now,
-                "request_count": 0,
+                "request_count": 1,
                 "limit": limite_aleatorio
             }
 
@@ -128,9 +145,11 @@ class SecureNetworkClient:
                 for key in keys_to_remove:
                     entry = self._pool.pop(key)
                     try:
-                        await entry["session"].__aexit__(None, None, None)
-                        log.info(
-                            f"Sesión inactiva cerrada automáticamente o por límite de solicitudes: {key[0]} | Proxy: {key[1]} | Sticky ID: {key[2]} | Requests: {entry['request_count']}")
+                        self._pool.pop(key, None)
+                        session_close = asyncio.create_task(self._close_session_with_grace(
+                            entry["session"], key[0], delay=self.client_timeout + 5.0))
+                        session_close.add_done_callback(lambda fut, domain=key[0]: log.info(
+                            f"Sesión para {domain} cerrada tras rotación."))
                     except Exception as e:
                         log.error(f"Error al cerrar sesión inactiva: {e}")
 

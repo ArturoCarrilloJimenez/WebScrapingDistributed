@@ -11,15 +11,24 @@ class ProxyMode(str, Enum):
 class Settings(BaseSettings):
     num_max_tasks: int = 10
     worker_num_max_concurrent_tasks: int = 10
+    
+    # aws
+    aws_access_key_id: str = "test" # Clave de acceso de AWS (puede ser cualquier valor para pruebas locales)
+    aws_secret_access_key: str = "test" # Clave secreta de acceso de AWS (puede ser cualquier valor para pruebas locales)
     default_region_aws: str = "us-east-1"
-    sqs_endpoint_url: str = "http://localhost:9324"  # URL del endpoint de SQS local
-    # URL de la cola SQS local
-    sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue"
-    # Clave de acceso de AWS (puede ser cualquier valor para pruebas locales)
-    aws_access_key_id: str = "test"
-    # Clave secreta de acceso de AWS (puede ser cualquier valor para pruebas locales)
-    aws_secret_access_key: str = "test"
 
+    # sqs
+    sqs_endpoint_url: str = "http://localhost:9324"  # URL del endpoint de SQS local
+    sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue" # URL de la cola SQS local
+    sqs_region: str = default_region_aws
+
+    # s3
+    s3_endpoint_url: str = "http://localhost:9000"  # URL del endpoint de S3 local
+    s3_bucket_name: str = "my-bucket"  # Nombre del bucket S
+    s3_region: str = default_region_aws
+
+
+    # Proxy y cliente de red
     proxy_enabled: bool = False  # Controla si se usan proxies o no
     proxy_mode: ProxyMode = ProxyMode.STATIC_POOL  # "static_pool" o "backconnect"
     proxy_static_list: str = ""  # Lista de proxies para el modo static_pool, separada por comas

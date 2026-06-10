@@ -24,8 +24,16 @@ echo "DLQ ARN: $DLQ_ARN"
 awslocal sqs create-queue \
     --queue-name scraping-tasks \
     --attributes '{
-        "VisibilityTimeout": "60",
+        "VisibilityTimeout": "300",
         "RedrivePolicy": "{\"deadLetterTargetArn\":\"'"$DLQ_ARN"'\",\"maxReceiveCount\":\"10\"}"
     }'
+
+echo "Main queue 'scraping-tasks' created and linked to DLQ successfully."
+
+# 4. Crear el Bucket S3 para el Data Sink
+# Mapeado directamente con settings.s3_bucket_name
+awslocal s3 mb s3://scraping-raw-data
+
+echo "S3 Bucket 'scraping-raw-data' created successfully."
 
 echo "----------- Infrastructure Ready -----------"

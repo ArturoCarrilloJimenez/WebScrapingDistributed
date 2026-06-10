@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 from shared.models import ScrapingTask
 from shared.logging import Logger
+
+from scraping.interfaces.interfaces import ParseResult
 
 
 class BaseParser(ABC):
@@ -9,19 +11,16 @@ class BaseParser(ABC):
         self.log = Logger(self.__class__.__name__)
 
     @abstractmethod
-    async def parse(self, task: ScrapingTask) -> Dict[str, Any]:
+    async def parse(self, task: ScrapingTask) -> ParseResult:
         """
         Lógica de extracción pura.
         Recibe la tarea validada y devuelve los datos limpios.
         """
         pass
 
-    def _prepare_result(self, task: ScrapingTask, data: Any) -> Dict[str, Any]:
+    def _prepare_result(self, task: ScrapingTask, data: Any) -> ParseResult:
         """Estandariza la salida para subir los datos a S3 o el que corresponda."""
-        return {
-            "job_id": task.job_id,
-            "task_id": task.task_id,
-            "url": task.url,
-            "data": data,
-            "parser_type": task.parser_type.value
-        }
+        return ParseResult(
+            task=task,
+            data=data
+        )

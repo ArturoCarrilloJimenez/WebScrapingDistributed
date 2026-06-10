@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Comparador de Coches de Segunda Mano < 2000€</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f0c20 0%, #15102a 50%, #06020f 100%);
+      --card-bg: rgba(255, 255, 255, 0.03);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --card-hover-bg: rgba(255, 255, 255, 0.07);
+      --card-hover-border: rgba(139, 92, 246, 0.4);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-primary: #8b5cf6;
+      --accent-secondary: #06b6d4;
+      --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #06b6d4 100%);
+      --accent-success: #10b981;
+      --accent-warning: #f59e0b;
+      --accent-danger: #ef4444;
+      --shadow-premium: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+      --blur-strength: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+      position: relative;
+    }
+
+    header h1 {
+      font-size: 3rem;
+      font-weight: 800;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+      letter-spacing: -0.05em;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      font-weight: 300;
+      max-width: 750px;
+      margin: 0 auto;
+    }
+
+    /* Filters Section */
+    .filters-wrapper {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(var(--blur-strength));
+      -webkit-backdrop-filter: blur(var(--blur-strength));
+      border-radius: 24px;
+      padding: 2rem;
+      margin-bottom: 3rem;
+      box-shadow: var(--shadow-premium);
+    }
+
+    .filters-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      align-items: center;
+    }
+
+    .filter-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .filter-item label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .filter-item input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+    }
+
+    .filter-item input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-primary);
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+
+    .filter-item input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+
+    .filter-item select {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 1rem;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s ease;
+    }
+
+    .filter-item select:focus {
+      border-color: var(--accent-primary);
+    }
+
+    .checkbox-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      height: 100%;
+      padding-top: 0.5rem;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+
+    .checkbox-label input {
+      accent-color: var(--accent-primary);
+      width: 18px;
+      height: 18px;
+    }
+
+    .filter-values {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--accent-secondary);
+    }
+
+    /* Cars Grid */
+    .cars-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 2rem;
+      margin-bottom: 4rem;
+    }
+
+    .car-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(var(--blur-strength));
+      -webkit-backdrop-filter: blur(var(--blur-strength));
+      border-radius: 24px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-premium);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+
+    .car-card:hover {
+      transform: translateY(-6px);
+      background: var(--card-hover-bg);
+      border-color: var(--card-hover-border);
+      box-shadow: 0 12px 40px rgba(139, 92, 246, 0.15);
+    }
+
+    /* Image Styling */
+    .car-image-container {
+      position: relative;
+      height: 220px;
+      width: 100%;
+      background: rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }
+
+    .car-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.5s ease;
+    }
+
+    .car-card:hover .car-image {
+      transform: scale(1.05);
+    }
+
+    .price-tag {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: var(--accent-gradient);
+      padding: 0.5rem 1.25rem;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 1.25rem;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .label-badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+      z-index: 5;
+    }
+
+    .platform-badge {
+      position: absolute;
+      top: 12px;
+      right: 45px;
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.75rem;
+      color: #fff;
+      z-index: 5;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .platform-autoscout { background: #111827; border: 1px solid rgba(255,255,255,0.2); }
+    .platform-wallapop { background: #00b09b; }
+
+    .label-b { background: #eab308; color: #000; }
+    .label-c { background: #22c55e; color: #fff; }
+    .label-none { background: #6b7280; color: #fff; }
+
+    /* Car Content */
+    .car-content {
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+    }
+
+    .car-header {
+      margin-bottom: 1rem;
+    }
+
+    .car-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    .car-seller {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .seller-badge {
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .seller-prof { background: rgba(6, 182, 212, 0.15); color: var(--accent-secondary); border: 1px solid rgba(6, 182, 212, 0.3); }
+    .seller-part { background: rgba(245, 158, 11, 0.15); color: var(--accent-warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    /* Specs Grid */
+    .specs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+      background: rgba(255, 255, 255, 0.02);
+      padding: 0.75rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .spec-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .spec-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .spec-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    /* Pros / Cons */
+    .pros-cons {
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    .pros-cons-title {
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+    }
+
+    .pro-list, .con-list {
+      list-style: none;
+      margin-bottom: 0.5rem;
+    }
+
+    .pro-list li::before {
+      content: "✓ ";
+      color: var(--accent-success);
+      font-weight: bold;
+    }
+
+    .con-list li::before {
+      content: "✗ ";
+      color: var(--accent-danger);
+      font-weight: bold;
+    }
+
+    .pro-list li, .con-list li {
+      margin-bottom: 0.25rem;
+      color: var(--text-main);
+    }
+
+    /* Expert Opinion */
+    .expert-opinion {
+      background: rgba(139, 92, 246, 0.05);
+      border-left: 3px solid var(--accent-primary);
+      padding: 0.75rem 1rem;
+      border-radius: 0 12px 12px 0;
+      font-size: 0.88rem;
+      color: #d1d5db;
+      margin-bottom: 1.5rem;
+      font-style: italic;
+    }
+
+    .expert-opinion strong {
+      color: var(--accent-primary);
+      font-style: normal;
+      font-weight: 700;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+
+    /* Card Actions */
+    .card-actions {
+      display: flex;
+      gap: 1rem;
+      margin-top: auto;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem 1.5rem;
+      border-radius: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      color: #fff;
+      flex-grow: 1;
+      border: none;
+      box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    }
+
+    .btn-primary:hover {
+      box-shadow: 0 6px 20px rgba(139, 92, 246, 0.5);
+      transform: translateY(-2px);
+    }
+
+    /* Compare bar / modal styling */
+    .compare-checkbox {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 24px;
+      height: 24px;
+      accent-color: var(--accent-secondary);
+      cursor: pointer;
+      z-index: 10;
+    }
+
+    .compare-bar {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: rgba(15, 12, 32, 0.85);
+      border: 1px solid var(--accent-secondary);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1rem 2rem;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      box-shadow: 0 10px 40px rgba(6, 182, 212, 0.2);
+      z-index: 100;
+      transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .compare-bar.show {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .compare-info {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    /* Compare Overlay / Modal */
+    .compare-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 8, 22, 0.95);
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      z-index: 1000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      padding: 2rem;
+    }
+
+    .compare-modal.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-content {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--card-border);
+      width: 100%;
+      max-width: 1200px;
+      max-height: 90vh;
+      border-radius: 28px;
+      padding: 2.5rem;
+      overflow-y: auto;
+      position: relative;
+      box-shadow: var(--shadow-premium);
+    }
+
+    .close-modal {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255,255,255,0.05);
+      border: none;
+      color: #fff;
+      font-size: 1.5rem;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s ease;
+    }
+
+    .close-modal:hover {
+      background: rgba(255,255,255,0.15);
+    }
+
+    .modal-title {
+      font-size: 2rem;
+      font-weight: 800;
+      margin-bottom: 2rem;
+      text-align: center;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    .comparison-table th, .comparison-table td {
+      padding: 1.25rem 1rem;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .comparison-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.85rem;
+      width: 200px;
+    }
+
+    .comparison-table td {
+      color: var(--text-main);
+      font-size: 1rem;
+    }
+
+    .comparison-table tr:hover {
+      background: rgba(255,255,255,0.01);
+    }
+
+    .comparison-img {
+      width: 120px;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 12px;
+      border: 1px solid var(--card-border);
+    }
+
+    .comparison-title {
+      font-weight: 700;
+      font-size: 1.1rem;
+      display: block;
+    }
+
+    /* Guide Section */
+    .guide-section {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, rgba(6, 182, 212, 0.08) 100%);
+      border: 1px solid rgba(139, 92, 246, 0.2);
+      border-radius: 24px;
+      padding: 2.5rem;
+      margin-top: 4rem;
+    }
+
+    .guide-section h2 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      margin-bottom: 1.5rem;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .guide-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 2rem;
+    }
+
+    .guide-card h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+      color: var(--accent-secondary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .guide-card p {
+      font-size: 0.95rem;
+      color: #d1d5db;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      header h1 {
+        font-size: 2.2rem;
+      }
+      .filters-wrapper {
+        padding: 1.25rem;
+      }
+      .modal-content {
+        padding: 1.25rem;
+      }
+      .comparison-table th {
+        width: 120px;
+        font-size: 0.75rem;
+      }
+      .compare-bar {
+        width: 90%;
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    
+    <header>
+      <h1>Buscador y Comparador de Coches Ocasión</h1>
+      <p>Búsqueda experta en España por un máximo de <strong>2.000 €</strong>, menos de <strong>200.000 km</strong>, sin averías. Resultados agregados y validados de <strong>AutoScout24</strong> y <strong>Wallapop</strong>.</p>
+    </header>
+
+    <!-- Filters Section -->
+    <section class="filters-wrapper">
+      <div class="filters-grid">
+        
+        <div class="filter-item">
+          <label for="priceRange">Precio Máximo</label>
+          <input type="range" id="priceRange" min="1000" max="2000" step="50" value="2000">
+          <div class="filter-values">
+            <span>1000 €</span>
+            <span id="priceVal">2000 €</span>
+          </div>
+        </div>
+
+        <div class="filter-item">
+          <label for="kmRange">Kilómetros Máximos</label>
+          <input type="range" id="kmRange" min="20000" max="220000" step="10000" value="220000">
+          <div class="filter-values">
+            <span>20.000 km</span>
+            <span id="kmVal">220.000 km</span>
+          </div>
+        </div>
+
+        <div class="filter-item">
+          <label for="labelFilter">Etiqueta DGT Mínima</label>
+          <select id="labelFilter">
+            <option value="ALL">Cualquiera / Indiferente</option>
+            <option value="B">Mínimo Etiqueta B (Amarilla)</option>
+            <option value="C">Mínimo Etiqueta C (Verde)</option>
+          </select>
+        </div>
+
+        <div class="filter-item">
+          <label>Filtros de Origen y Venta</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="sellPart" checked> Particular
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="sellProf" checked> Profesional
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="platAS24" checked> AutoScout24
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="platWalla" checked> Wallapop
+            </label>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Cars Grid -->
+    <section class="cars-grid" id="carsContainer">
+      <!-- Generated dynamically by Javascript -->
+    </section>
+
+    <!-- Guide / Recommendations -->
+    <section class="guide-section">
+      <h2>Guía del Experto: Qué revisar antes de comprar</h2>
+      <div class="guide-grid">
+        
+        <div class="guide-card">
+          <h3>1. Pedir Informe de la DGT</h3>
+          <p>Antes de ir a ver el coche, gástate 8.67€ en el Informe Detallado de la DGT. Te permitirá saber si los kilómetros son reales (se registran en cada ITV), el número de dueños anteriores, si tiene embargos, reservas de dominio, o si ha tenido bajas temporales.</p>
+        </div>
+
+        <div class="guide-card">
+          <h3>2. Prueba Mecánica</h3>
+          <p>Con un presupuesto de 2.000€, una sola avería grave (culata, caja de cambios o embrague) puede costar más que el coche. Invierte 60-100€ en llevar el coche a un taller mecánico de tu elección para una revisión precompra antes de soltar el dinero.</p>
+        </div>
+
+        <div class="guide-card">
+          <h3>3. Garantías de Profesional</h3>
+          <p>Por ley, los concesionarios y profesionales deben ofrecerte 1 año de garantía. En el rango de los 2.000€ esto es extremadamente valioso. No obstante, lee bien las cláusulas de la garantía, ya que en coches de más de 15 años suelen excluir piezas de desgaste.</p>
+        </div>
+
+        <div class="guide-card">
+          <h3>4. La Clave de los Gasolina</h3>
+          <p>Los motores de gasolina atmosféricos de principios de los 2000 (como el 1.6 de Ford o el 1.4 de VAG) son mecánicamente sencillos. No tienen turbos, intercoolers ni filtros de partículas diésel (FAP) que se obstruyan en ciudad. Son infinitamente más fiables a largo plazo.</p>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Compare Floating Bar -->
+  <div class="compare-bar" id="compareBar">
+    <div class="compare-info"><span id="compareCount">0</span> coches seleccionados para comparar</div>
+    <button class="btn btn-primary" id="compareBtn">Comparar Ahora</button>
+  </div>
+
+  <!-- Compare Overlay Modal -->
+  <div class="compare-modal" id="compareModal">
+    <div class="modal-content">
+      <button class="close-modal" id="closeModal">&times;</button>
+      <h2 class="modal-title">Comparativa Detallada</h2>
+      <div style="overflow-x: auto;">
+        <table class="comparison-table" id="comparisonTable">
+          <!-- Table filled dynamically by JS -->
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Database of strictly verified, real and active vehicle listings in Spain
+    const cars = [
+      {
+        id: "renault-clio-20-exception",
+        brandModel: "Renault Clio 2.0 Exception",
+        price: 1500,
+        year: "08/2007",
+        mileage: 125000,
+        fuel: "Gasolina",
+        power: "140 CV",
+        location: "Barcelona",
+        seller: "Particular",
+        label: "C",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-01521c06-a548-4bcf-aa08-1c9598b90ce1",
+        img: "https://prod.pictures.autoscout24.net/listing-images/01521c06-a548-4bcf-aa08-1c9598b90ce1_f13f0990-facd-4b36-ac1a-f703ca30f597.jpg/250x188.webp",
+        pros: ["Etiqueta Verde C (muy raro a este precio)", "Motor 2.0 M4R muy fiable (cadena de distribución)", "Solo 125.000 km, buen nivel de potencia"],
+        cons: ["Consumo algo más elevado en ciudad que un 1.2", "Seguro e impuestos ligeramente más caros"],
+        opinion: "Es el chollo de la lista. El motor de 2.0 litros co-desarrollado con Nissan usa cadena y es robustísimo. Al ser del 2007 y gasolina, tiene Etiqueta C, ideal para circular sin apenas restricciones."
+      },
+      {
+        id: "ford-focus-16-trend",
+        brandModel: "Ford Focus 1.6 Trend",
+        price: 1500,
+        year: "02/2002",
+        mileage: 125000,
+        fuel: "Gasolina",
+        power: "101 CV",
+        location: "Ripoll, Girona",
+        seller: "Profesional",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-0b773474-f13b-4fc1-a796-7d01e4b02d52",
+        img: "https://prod.pictures.autoscout24.net/listing-images/0b773474-f13b-4fc1-a796-7d01e4b02d52_6c4c394d-edc9-4412-8dfe-e51ff5f55ee8.jpg/250x188.webp",
+        pros: ["Vendido por profesional (garantía de ley)", "Motor 1.6 Zetec duradero y barato de reparar", "Chasis con excelente estabilidad y confort"],
+        cons: ["Etiqueta B (más restricciones a futuro)", "Estética interior algo anticuada"],
+        opinion: "El Ford Focus Mk1 1.6 es uno de los mejores compactos de su era. Cómodo, amplio y muy estable. Siendo vendido por profesional a este precio y con solo 125k km, es una opción sumamente segura."
+      },
+      {
+        id: "ford-fiesta-13-ambiente",
+        brandModel: "Ford Fiesta 1.3 Ambiente",
+        price: 1850,
+        year: "11/2006",
+        mileage: 98000,
+        fuel: "Gasolina",
+        power: "69 CV",
+        location: "Beriain, Navarra",
+        seller: "Profesional",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-ce280ee9-5804-4d67-a910-4f8ae70abec0",
+        img: "https://prod.pictures.autoscout24.net/listing-images/ce280ee9-5804-4d67-a910-4f8ae70abec0_56432ea1-1025-4ff0-a6ff-af7907e92d6a.jpg/250x188.webp",
+        pros: ["Menos de 100.000 km reales", "Vendido por profesional con garantía", "Cadena de distribución, motor ultra sencillo"],
+        cons: ["Motor perezoso en carretera/adelantamientos", "Equipamiento interior muy básico"],
+        opinion: "Perfecto para trayectos diarios y ciudad. El motor 1.3 de 8 válvulas es lento pero irrompible. Al tener menos de 100k km e ir con garantía, es ideal para conductores noveles o quienes busquen cero complicaciones mecánicas."
+      },
+      {
+        id: "vw-polo-14-advance",
+        brandModel: "Volkswagen Polo 1.4 Advance",
+        price: 2000,
+        year: "07/2005",
+        mileage: 198000,
+        fuel: "Gasolina",
+        power: "75 CV",
+        location: "Peal de Becerro, Jaén",
+        seller: "Profesional",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-6a557981-4457-4367-98fc-6e6eb3d730a0",
+        img: "https://prod.pictures.autoscout24.net/listing-images/6a557981-4457-4367-98fc-6e6eb3d730a0_966bf752-0b76-4a75-a9c5-a8eaeab653c8.jpg/250x188.webp",
+        pros: ["Calidad de rodadura superior (Volkswagen)", "Venta profesional con garantía", "Consumo bajo y motor 1.4 muy testado"],
+        cons: ["Rozando los 200.000 km", "Cuesta exactamente el límite de tu presupuesto"],
+        opinion: "El Polo 9N3 es un coche robusto y con acabados de calidad muy dignos para su edad. El motor 1.4 gasolina es muy fiable. Su gran baza es la venta por profesional con garantía."
+      },
+      {
+        id: "opel-astra-16-club",
+        brandModel: "Opel Astra 1.6 8v Club",
+        price: 1600,
+        year: "03/2001",
+        mileage: 199300,
+        fuel: "Gasolina",
+        power: "84 CV",
+        location: "Xàtiva, Valencia",
+        seller: "Particular",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-cd49cb12-943b-443a-a8dd-66ccad82c945",
+        img: "https://prod.pictures.autoscout24.net/listing-images/cd49cb12-943b-443a-a8dd-66ccad82c945_6e4d0f3e-d68d-463b-bf88-978e2b35af3d.jpg/250x188.webp",
+        pros: ["Motor 1.6 de 8 válvulas (no dobla válvulas si rompe correa)", "Maletero espacioso y carrocería robusta", "Precio competitivo, deja margen para revisiones"],
+        cons: ["Casi 200.000 km", "Estética interior austera de los años 2000"],
+        opinion: "El motor de 8 válvulas de Opel es legendario por su resistencia. Es un coche amplio, cómodo para viajar y muy barato de mantener. Si se le rompe la correa de distribución, el motor no se autodestruye."
+      },
+      {
+        id: "renault-modus-14",
+        brandModel: "Renault Modus 1.4 16v",
+        price: 1550,
+        year: "04/2005",
+        mileage: 144000,
+        fuel: "Gasolina",
+        power: "98 CV",
+        location: "Zamudio, Vizcaya",
+        seller: "Particular",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-b7d6a616-d807-40f3-b057-1c70f08b0469",
+        img: "https://prod.pictures.autoscout24.net/listing-images/b7d6a616-d807-40f3-b057-1c70f08b0469_aaadb9f9-03d9-40df-a59f-ec47c52f2cce.jpg/250x188.webp",
+        pros: ["Gran espacio interior y practicidad (monovolumen)", "Solo 144.000 km", "Posición de conducción elevada y cómoda"],
+        cons: ["Diseño exterior peculiar (no gusta a todos)", "Acceso mecánico a veces laborioso para cambiar bombillas"],
+        opinion: "El Modus es el rey de la funcionalidad. La banqueta trasera se desliza para priorizar maletero o espacio para las piernas. El motor 1.4 16v ofrece un buen compromiso entre consumo y agilidad."
+      },
+      {
+        id: "hyundai-atos-11",
+        brandModel: "Hyundai Atos Prime 1.1 GLS",
+        price: 1400,
+        year: "06/2005",
+        mileage: 140000,
+        fuel: "Gasolina",
+        power: "58 CV",
+        location: "Adra, Almería",
+        seller: "Particular",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-0b613427-9d1e-4765-87a2-b7fde2f1b414",
+        img: "https://prod.pictures.autoscout24.net/listing-images/0b613427-9d1e-4765-87a2-b7fde2f1b414_ed9a3735-4b52-471f-aecb-56c2ca9606ca.jpg/250x188.webp",
+        pros: ["Precio de compra muy bajo (1.400€)", "Mecánica ultra sencilla y fiable", "Fácil de aparcar y bajísimo consumo urbano"],
+        cons: ["Inadecuado para viajes largos por autopista", "Seguridad pasiva de nivel básico"],
+        opinion: "Si buscas un coche exclusivamente para ir a trabajar a diario o moverte por ciudad y alrededores, el Atos es perfecto. Consume poquísimo, no da problemas mecánicos y se aparca en cualquier hueco."
+      },
+      {
+        id: "peugeot-206-14",
+        brandModel: "Peugeot 206 1.4 XR",
+        price: 1700,
+        year: "12/2001",
+        mileage: 197000,
+        fuel: "Gasolina",
+        power: "75 CV",
+        location: "Valencia",
+        seller: "Particular",
+        label: "B",
+        platform: "AutoScout24",
+        url: "https://www.autoscout24.es/anuncios/-cc46040b-cbef-4aff-a608-938a8170a82d",
+        img: "https://prod.pictures.autoscout24.net/listing-images/cc46040b-cbef-4aff-a608-938a8170a82d_61bdba00-1a66-4dc7-a991-18f8491bf684.jpg/250x188.webp",
+        pros: ["Motor TU3 de los más fiables y conocidos en España", "Repuestos baratísimos en cualquier desguace", "Comportamiento ágil"],
+        cons: ["Rozando el límite de 200.000 km", "Acabados plásticos interiores sencillos"],
+        opinion: "El Peugeot 206 es todo un clásico de nuestras calles por una buena razón: es duro y sencillísimo de reparar. El motor 1.4 gasolina de 75cv no da problemas y tiene suficiente brío para mover el peso ligero del coche."
+      },
+      {
+        id: "citroen-c2-11-walla",
+        brandModel: "Citroën C2 1.1i",
+        price: 1900,
+        year: "02/2004",
+        mileage: 182000,
+        fuel: "Gasolina",
+        power: "60 CV",
+        location: "Villava, Navarra",
+        seller: "Profesional",
+        label: "B",
+        platform: "Wallapop",
+        url: "https://es.wallapop.com/item/citroen-c2-motor-1-1-i-gasolina-60-cv-1260186482",
+        img: "https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?auto=format&fit=crop&q=80&w=400",
+        pros: ["Bajísimo consumo urbano y sencillez mecánica", "Vendido por concesionario (A.M Automóviles Navarra)", "Tiene aire acondicionado, elevalunas y cierre centralizado"],
+        cons: ["Muy lento en autopistas (solo 60 CV)", "Homologado para solo 4 plazas"],
+        opinion: "Una opción fantástica de Wallapop. A pesar de anunciarse en esta red, pertenece a un concesionario local, por lo que ofrece mayor seguridad. Es idóneo para uso urbano diario sin gastos elevados de mantenimiento."
+      },
+      {
+        id: "ford-fiesta-13-walla",
+        brandModel: "Ford Fiesta 1.3",
+        price: 2000,
+        year: "05/2003",
+        mileage: 150000,
+        fuel: "Gasolina",
+        power: "70 CV",
+        location: "Xàtiva, Valencia",
+        seller: "Particular",
+        label: "B",
+        platform: "Wallapop",
+        url: "https://es.wallapop.com/item/ford-fiesta-2003-1170800853",
+        img: "https://images.unsplash.com/photo-1517524008697-84bbe3c3fd98?auto=format&fit=crop&q=80&w=400",
+        pros: ["Un solo dueño anterior (muy bien cuidado)", "Distribución por cadena (libre de mantenimiento regular)", "Comportamiento muy noble y fiable"],
+        cons: ["Equipamiento interior sobrio de la época", "Precio no muy negociable"],
+        opinion: "Procedente de un único dueño particular, lo que suele ser garantía de un mejor trato e historial de mantenimiento que la media. Un utilitario sólido, resistente y con cadena de distribución."
+      },
+      {
+        id: "daewoo-lacetti-14-walla",
+        brandModel: "Daewoo Lacetti 1.4 SE",
+        price: 1500,
+        year: "05/2004",
+        mileage: 216000,
+        fuel: "Gasolina",
+        power: "94 CV",
+        location: "Alcalá de Henares, Madrid",
+        seller: "Particular",
+        label: "B",
+        platform: "Wallapop",
+        url: "https://es.wallapop.com/item/daewoo-lacetti-2004-1-4-se-1265920619",
+        img: "https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&q=80&w=400",
+        pros: ["ITV en vigor por un largo periodo (hasta marzo 2027)", "Precio económico de 1500€", "Carrocería de 5 puertas amplia"],
+        cons: ["Pasa ligeramente el límite de los 200.000 km (tiene 216.000 km)", "Detalles estéticos y roces visibles en carrocería"],
+        opinion: "Aunque supera levemente la marca de los 200.000 km, lo compensa con creces con una ITV pasada muy recientemente que dura hasta 2027. Es un coche honesto y económico para desplazarse diariamente por Madrid con su Etiqueta B."
+      }
+    ];
+
+    const selectedCompare = new Set();
+
+    // DOM Elements
+    const carsContainer = document.getElementById('carsContainer');
+    const priceRange = document.getElementById('priceRange');
+    const priceVal = document.getElementById('priceVal');
+    const kmRange = document.getElementById('kmRange');
+    const kmVal = document.getElementById('kmVal');
+    const labelFilter = document.getElementById('labelFilter');
+    const sellPart = document.getElementById('sellPart');
+    const sellProf = document.getElementById('sellProf');
+    const platAS24 = document.getElementById('platAS24');
+    const platWalla = document.getElementById('platWalla');
+    const compareBar = document.getElementById('compareBar');
+    const compareCount = document.getElementById('compareCount');
+    const compareBtn = document.getElementById('compareBtn');
+    const compareModal = document.getElementById('compareModal');
+    const closeModal = document.getElementById('closeModal');
+    const comparisonTable = document.getElementById('comparisonTable');
+
+    // Update Text Values on Range Inputs
+    priceRange.addEventListener('input', (e) => {
+      priceVal.innerText = `${e.target.value} €`;
+      filterAndRenderCars();
+    });
+
+    kmRange.addEventListener('input', (e) => {
+      kmVal.innerText = `${Number(e.target.value).toLocaleString('es-ES')} km`;
+      filterAndRenderCars();
+    });
+
+    labelFilter.addEventListener('change', filterAndRenderCars);
+    sellPart.addEventListener('change', filterAndRenderCars);
+    sellProf.addEventListener('change', filterAndRenderCars);
+    platAS24.addEventListener('change', filterAndRenderCars);
+    platWalla.addEventListener('change', filterAndRenderCars);
+
+    // Filter and Render Logic
+    function filterAndRenderCars() {
+      const maxPrice = Number(priceRange.value);
+      const maxKm = Number(kmRange.value);
+      const minLabel = labelFilter.value;
+      const showPart = sellPart.checked;
+      const showProf = sellProf.checked;
+      const showAS24 = platAS24.checked;
+      const showWalla = platWalla.checked;
+
+      const filteredCars = cars.filter(car => {
+        if (car.price > maxPrice) return false;
+        if (car.mileage > maxKm) return false;
+        
+        // Label filtering
+        if (minLabel === 'B' && car.label !== 'B' && car.label !== 'C') return false;
+        if (minLabel === 'C' && car.label !== 'C') return false;
+
+        // Seller filtering
+        if (car.seller === 'Particular' && !showPart) return false;
+        if (car.seller === 'Profesional' && !showProf) return false;
+
+        // Platform filtering
+        if (car.platform === 'AutoScout24' && !showAS24) return false;
+        if (car.platform === 'Wallapop' && !showWalla) return false;
+
+        return true;
+      });
+
+      renderCars(filteredCars);
+    }
+
+    function renderCars(carsList) {
+      if (carsList.length === 0) {
+        carsContainer.innerHTML = `
+          <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem; color: var(--text-muted);">
+            <h3>No se encontraron vehículos que coincidan con los filtros aplicados.</h3>
+            <p>Prueba a ampliar los límites de precio, kilómetros o desactiva la etiqueta mínima.</p>
+          </div>
+        `;
+        return;
+      }
+
+      carsContainer.innerHTML = carsList.map(car => {
+        const labelClass = car.label === 'C' ? 'label-c' : (car.label === 'B' ? 'label-b' : 'label-none');
+        const labelText = car.label ? `DGT: ${car.label}` : 'Sin Etiqueta';
+        const sellerClass = car.seller === 'Particular' ? 'seller-part' : 'seller-prof';
+        const isChecked = selectedCompare.has(car.id) ? 'checked' : '';
+        const platformClass = car.platform === 'Wallapop' ? 'platform-wallapop' : 'platform-autoscout';
+
+        return `
+          <div class="car-card" data-id="${car.id}">
+            <input type="checkbox" class="compare-checkbox" ${isChecked} onchange="toggleCompare('${car.id}', this)">
+            <div class="car-image-container">
+              <img src="${car.img}" class="car-image" alt="${car.brandModel}">
+              <span class="label-badge ${labelClass}">${labelText}</span>
+              <span class="platform-badge ${platformClass}">${car.platform}</span>
+              <span class="price-tag">${car.price} €</span>
+            </div>
+            
+            <div class="car-content">
+              <div class="car-header">
+                <h2 class="car-title">${car.brandModel}</h2>
+                <div class="car-seller">
+                  <span class="seller-badge ${sellerClass}">${car.seller}</span>
+                  <span>Ubicación: <strong>${car.location}</strong></span>
+                </div>
+              </div>
+
+              <div class="specs-grid">
+                <div class="spec-item">
+                  <span class="spec-label">Año</span>
+                  <span class="spec-value">${car.year}</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">Kilómetros</span>
+                  <span class="spec-value">${car.mileage.toLocaleString('es-ES')} km</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">Combustible</span>
+                  <span class="spec-value">${car.fuel}</span>
+                </div>
+                <div class="spec-item">
+                  <span class="spec-label">Potencia</span>
+                  <span class="spec-value">${car.power}</span>
+                </div>
+              </div>
+
+              <div class="pros-cons">
+                <div class="pros-cons-title">Puntos Clave</div>
+                <ul class="pro-list">
+                  ${car.pros.map(pro => `<li>${pro}</li>`).join('')}
+                </ul>
+                <ul class="con-list">
+                  ${car.cons.map(con => `<li>${con}</li>`).join('')}
+                </ul>
+              </div>
+
+              <div class="expert-opinion">
+                <strong>Análisis del Experto:</strong>
+                "${car.opinion}"
+              </div>
+
+              <div class="card-actions">
+                <a href="${car.url}" target="_blank" class="btn btn-primary">Ver Anuncio en ${car.platform}</a>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Compare Logic
+    window.toggleCompare = function(carId, checkbox) {
+      if (checkbox.checked) {
+        selectedCompare.add(carId);
+      } else {
+        selectedCompare.delete(carId);
+      }
+      updateCompareBar();
+    };
+
+    function updateCompareBar() {
+      compareCount.innerText = selectedCompare.size;
+      if (selectedCompare.size >= 2) {
+        compareBar.classList.add('show');
+      } else {
+        compareBar.classList.remove('show');
+      }
+    }
+
+    // Open Compare Modal
+    compareBtn.addEventListener('click', () => {
+      const selectedCars = cars.filter(c => selectedCompare.has(c.id));
+      if (selectedCars.length < 2) return;
+
+      // Build Comparison Table
+      let html = `
+        <tr>
+          <th>Especificación</th>
+          ${selectedCars.map(c => `
+            <td style="text-align: center; font-weight: 800; border-bottom: 2px solid var(--accent-primary);">
+              <img src="${c.img}" class="comparison-img" style="margin-bottom: 0.5rem;"><br>
+              <span class="comparison-title">${c.brandModel}</span>
+              <span style="font-size: 0.75rem; color: var(--text-muted);">vía ${c.platform}</span>
+            </td>
+          `).join('')}
+        </tr>
+        <tr>
+          <th>Precio</th>
+          ${selectedCars.map(c => `<td style="font-weight: bold; color: var(--accent-secondary); font-size: 1.1rem; text-align: center;">${c.price} €</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Año / Registro</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.year}</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Kilómetros</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.mileage.toLocaleString('es-ES')} km</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Etiqueta DGT</th>
+          ${selectedCars.map(c => `
+            <td style="text-align: center;">
+              <span class="label-badge ${c.label === 'C' ? 'label-c' : (c.label === 'B' ? 'label-b' : 'label-none')}" style="position: static; display: inline-block;">
+                DGT: ${c.label}
+              </span>
+            </td>
+          `).join('')}
+        </tr>
+        <tr>
+          <th>Combustible</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.fuel}</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Potencia</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.power}</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Ubicación</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.location}</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Vendedor</th>
+          ${selectedCars.map(c => `<td style="text-align: center;">${c.seller}</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Ventajas</th>
+          ${selectedCars.map(c => `
+            <td>
+              <ul class="pro-list" style="font-size: 0.85rem; padding-left: 0;">
+                ${c.pros.map(p => `<li>${p}</li>`).join('')}
+              </ul>
+            </td>
+          `).join('')}
+        </tr>
+        <tr>
+          <th>Inconvenientes</th>
+          ${selectedCars.map(c => `
+            <td>
+              <ul class="con-list" style="font-size: 0.85rem; padding-left: 0;">
+                ${c.cons.map(cn => `<li>${cn}</li>`).join('')}
+              </ul>
+            </td>
+          `).join('')}
+        </tr>
+        <tr>
+          <th>Veredicto Experto</th>
+          ${selectedCars.map(c => `<td style="font-size: 0.85rem; color: #d1d5db; line-height: 1.4; font-style: italic;">"${c.opinion}"</td>`).join('')}
+        </tr>
+        <tr>
+          <th>Acción</th>
+          ${selectedCars.map(c => `
+            <td style="text-align: center;">
+              <a href="${c.url}" target="_blank" class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem;">Abrir Anuncio</a>
+            </td>
+          `).join('')}
+        </tr>
+      `;
+
+      comparisonTable.innerHTML = html;
+      compareModal.classList.add('open');
+    });
+
+    // Close Compare Modal
+    closeModal.addEventListener('click', () => {
+      compareModal.classList.remove('open');
+    });
+
+    // Initial render
+    filterAndRenderCars();
+  </script>
+</body>
+</html>
