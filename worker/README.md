@@ -29,7 +29,7 @@ graph TD
 
     StaticCSS -->|ParseResult| BufferService[Buffer de Trabajos - JobBufferService]
     
-    subgraphData Lake y Persistencia
+    subgraph DL [Data Lake y Persistencia]
         BufferService -->|3. Volcado masivo .jsonl| S3[(Amazon S3 - Data Lake)]
         BufferService -->|4. Confirmar Task| MemoryQueue[Cola en Memoria - ACK Queue]
     end
