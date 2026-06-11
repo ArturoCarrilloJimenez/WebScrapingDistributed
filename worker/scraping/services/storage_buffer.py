@@ -1,7 +1,7 @@
 import time
 import asyncio
 import uuid
-from typing import Dict
+from typing import Dict, Set
 from shared.logging import Logger
 
 from infrastructure.storage.base import BaseStorageRepository
@@ -30,6 +30,8 @@ class JobBufferService:
 
         # Tarea de fondo para limpiar buffers inactivos (evita que se queden huérfanos)
         self._ticker_task = None
+
+        self._background_tasks: Set[asyncio.Task] = set()
 
     async def add_record(self, result: ParseResult) -> None:
         """
@@ -84,7 +86,9 @@ class JobBufferService:
                 old_buffer = self._buffers.pop(job_id)
                 
                 # Desacoplamos la subida a S3 en una tarea background no bloqueante
-                asyncio.create_task(self._flush_buffer_to_storage(job_id, old_buffer))
+                task = asyncio.create_task(self._flush_buffer_to_storage(job_id, old_buffer))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
 
     async def _flush_buffer_to_storage(self, job_id: str, buffer: Buffer) -> None:
         """
@@ -136,18 +140,19 @@ class JobBufferService:
                 # Desacoplamos y vaciamos controladamente sin alterar la iteración del diccionario
                 for job_id in jobs_to_flush:
                     log.info(f"Ticker detectó inactividad por tiempo en Job [{job_id}]. Forzando Flush.")
+
                     old_buffer = self._buffers.pop(job_id)
-                    asyncio.create_task(self._flush_buffer_to_storage(job_id, old_buffer))
+
+                    task = asyncio.create_task(self._flush_buffer_to_storage(job_id, old_buffer))
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
     async def close(self):
         """Graceful Shutdown: Mecanismo de drenado rápido para evitar pérdida de datos al apagar el contenedor"""
         log.warning("Señal de apagado interceptada. Iniciando drenado síncrono de la RAM hacia S3...")
         if self._ticker_task:
             self._ticker_task.cancel()
-            try:
-                await self._ticker_task
-            except asyncio.CancelledError:
-                pass
+            await asyncio.gather(self._ticker_task, return_exceptions=True)
 
         async with self._lock:
             flush_tasks = []
@@ -159,6 +164,11 @@ class JobBufferService:
             if flush_tasks:
                 # Bloqueamos el cierre del proceso hasta que todas las subidas terminen o fallen de forma segura
                 await asyncio.gather(*flush_tasks, return_exceptions=True)
+
+            # Esperamos a que todas las tareas en background terminen
+            if self._background_tasks:
+                log.info(f"Esperando a que {len(self._background_tasks)} tareas en background finalicen su subida...")
+                await asyncio.gather(*self._background_tasks, return_exceptions=True)
             
             self._buffers.clear()
             
