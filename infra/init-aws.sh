@@ -34,7 +34,7 @@ awslocal sqs create-queue \
 
 echo "Main queue 'scraping-tasks' created and linked to DLQ successfully."
 
-# 4. Crear el Bucket S3 para el Data Sink
+# 4. Crear el Bucket S3 para elData Lake
 # Mapeado directamente con settings.s3_bucket_name
 awslocal s3 mb s3://scraping-raw-data || true
 

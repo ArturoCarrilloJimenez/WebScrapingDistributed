@@ -19,7 +19,7 @@ graph TD
         Semaphore -->|Sí| TaskN[Task wrapper - Tarea N]
     end
 
-    Task1 -->|Proxy & aiohttp| Web[Servidores Web Objetivo]
+    Task1 -->|Proxy & network_client| Web[Servidores Web Objetivo]
     Web -->|HTML / JSON| ParserFactory[ParserFactory]
     
     subgraph Motores de Parseo Modulares
@@ -27,26 +27,31 @@ graph TD
         ParserFactory -.->|Futuro: playwright_amazon| Playwright[PlaywrightParser]
     end
 
-    StaticCSS -->|Datos Extraídos| Result{¿Éxito?}
-    Result -->|Sí| MemoryQueue[Cola en Memoria - ACK Queue]
-    Result -.->|Futuro: Guardado asíncrono| S3[(Futuro Data Lake S3 - raw/processed)]
+    StaticCSS -->|ParseResult| BufferService[Buffer de Trabajos - JobBufferService]
+    
+    subgraphData Lake y Persistencia
+        BufferService -->|3. Volcado masivo .jsonl| S3[(Amazon S3 - Data Lake)]
+        BufferService -->|4. Confirmar Task| MemoryQueue[Cola en Memoria - ACK Queue]
+    end
 
-    MemoryQueue -->|Lotes de 10 max| Flusher[Flusher asíncrono de ACKs]
+    MemoryQueue -->|5. Lotes de 10 max| Flusher[Flusher asíncrono de ACKs]
     Flusher -->|DeleteMessageBatch| SQS
 ```
 
-### 1. Control de Concurrencia
+### 1. Control de Concurrencia y Fetch Seguro
 Para optimizar el ancho de banda y la capacidad de CPU de la máquina host sin saturarla:
 - El motor utiliza un semáforo asíncrono (`asyncio.Semaphore`) configurado por `WORKER_NUM_MAX_CONCURRENT_TASKS`.
 - Solo realiza peticiones de lectura a SQS (`fetch`) cuando hay capacidad libre en el semáforo.
 - El tamaño del lote de lectura se adapta dinámicamente: solicita un número de mensajes equivalente a los slots libres del semáforo (con un tope de 10 mensajes), maximizando la tasa de procesamiento sin desperdiciar tiempos de visibilidad.
+- **Fetch Concurrente Seguro**: Para evitar fugas de visibilidad en SQS al realizar peticiones de descarga paralelas en el pool asíncrono, la clase `SQSAioBotoAdapter` utiliza `asyncio.gather` y espera a que todas las peticiones terminen antes de procesarlas, previniendo cancelaciones abruptas de sockets en vuelo.
 
 ### 2. Protocolo de Apagado Seguro (Graceful Shutdown)
-El Worker está preparado para entornos elásticos de contenedores (como AWS ECS o Kubernetes) donde las instancias pueden crearse o destruirse bajo demanda. Captura las señales de terminación del sistema (`SIGINT` y `SIGTERM`) para realizar una desconexión controlada:
+El Worker está preparado para entornos elásticos de contenedores (como AWS ECS o Kubernetes) donde las instancias pueden crearse o destruirse bajo demanda. Captura las señales de terminación del sistema (`SIGINT` y `SIGTERM`) para realizar una desconexión controlada y coordinada:
 1. Cambia el estado interno a `running = False` para **detener la recepción de nuevos mensajes de SQS**.
 2. **Espera a que todas las tareas de scraping en vuelo finalicen** su ejecución de forma limpia.
-3. Activa un vaciado rápido del buffer de memoria para **enviar los ACKs pendientes a SQS**, asegurando que ningún mensaje procesado con éxito vuelva a procesarse por duplicado.
-4. Cierra de forma segura el pool de sockets y libera los recursos de red del cliente.
+3. Cierra el buffer de trabajos (`JobBufferService`), realizando un volcado síncrono de los datos almacenados en memoria (**drenado de RAM**) hacia S3 para todos los trabajos activos para prevenir la pérdida de datos volátiles.
+4. Encola las tareas correspondientes en la cola de borrado de SQS (`ack_queue`) y espera a que el flusher asíncrono de ACKs termine de vaciar la cola.
+5. Cierra las conexiones y sockets del cliente de almacenamiento (S3) y de SQS de forma limpia.
 
 ### 3. Vaciado Asíncrono de ACKs (`_ack_flusher`)
 En lugar de emitir una petición de borrado de red a SQS por cada mensaje procesado con éxito (lo que generaría un gran volumen de tráfico y llamadas API costosas), el Worker los deposita en un buffer en memoria (`asyncio.Queue`). Una tarea en segundo plano consume este buffer y elimina las tareas de SQS **en lotes optimizados de hasta 10 mensajes** (`acknowledge_batch`), reduciendo la latencia de red.
@@ -96,6 +101,9 @@ Para superar las barreras de protección de los servidores web objetivo, el micr
 - Canaliza el tráfico a través de un único endpoint de retorno (backconnect) configurado en `PROXY_URL`.
 - Soporta **Sticky Sessions**: Inyecta dinámicamente el identificador de sesión dentro de las credenciales de autenticación del proxy (técnica utilizada en proxies residenciales para retener la misma IP de salida de forma temporal).
 
+### C. Cierre Gracioso de Sesiones (Graceful Session Closure)
+- Para evitar que la rotación de sesiones corte de forma abrupta las peticiones de red en vuelo, el `SecureNetworkClient` retira la sesión del pool y la cierra de forma asíncrona en segundo plano tras un periodo de gracia (calculado a partir de los límites de timeout). Esto evita que los hilos y sockets activos sean cancelados a mitad de la descarga de datos.
+
 ---
 
 ## 🛠️ Configuración y Variables de Entorno
@@ -106,9 +114,13 @@ El archivo `.env` en la raíz controla el comportamiento del Worker:
 | :--- | :--- | :--- | :--- |
 | `WORKER_NUM_MAX_CONCURRENT_TASKS` | `int` | `10` | Concurrencia máxima (Semáforo) |
 | `NUM_MAX_TASKS` | `int` | `10` | Lote máximo de borrado y fetch (límite SQS 10) |
-| `DEFAULT_REGION_AWS` | `str` | `us-east-1` | Región para el cliente SQS |
+| `DEFAULT_REGION_AWS` | `str` | `us-east-1` | Región AWS por defecto del sistema |
 | `SQS_ENDPOINT_URL` | `str` | `http://emulator-aws:4566` | Endpoint del emulador de AWS SQS |
 | `SQS_QUEUE_URL` | `str` | `...` | URL física de la cola SQS |
+| `SQS_REGION` | `str` | `us-east-1` | Región de AWS específica para la cola SQS |
+| `S3_ENDPOINT_URL` | `str` | `http://localhost:9000` | Endpoint del emulador de S3 |
+| `S3_BUCKET_NAME` | `str` | `my-bucket` | Nombre del bucket destino (Data Sink) |
+| `S3_REGION` | `str` | `us-east-1` | Región de AWS específica para el almacenamiento S3 |
 | `PROXY_ENABLED` | `bool` | `False` | Activa/Desactiva el uso de proxies de red |
 | `PROXY_MODE` | `str` | `static_pool` | Modo de proxies (`static_pool` o `backconnect`) |
 | `PROXY_STATIC_LIST` | `str` | `""` | Lista de proxies estáticos separados por comas |
@@ -126,8 +138,8 @@ Actualmente, el sistema sobresale en extracción estática ultrarrápida con `St
 - **Bifurcación de Canales (Estático vs Dinámico)**: Al implementarse la extracción dinámica, la arquitectura separará los flujos físicos de trabajo en colas SQS independientes. Esto permitirá que las tareas estáticas se procesen bajo un perfil de **alta concurrencia**, mientras que las dinámicas operarán a **menor concurrencia** para proteger el consumo de hardware (CPU/RAM). El Producer se actualizará de forma transparente para clasificar y enrutar inteligentemente las tareas al canal adecuado.
 - **Motor de Parseo con IA / LLMs**: Integración de modelos de procesamiento de lenguaje natural para extraer datos estructurados de forma adaptativa.
 
-### 2. Almacenamiento Asíncrono en Amazon S3 (En Fase de Análisis)
-- **Persistencia en S3 (Data Lake)**: Se plantea implementar un adaptador de almacenamiento asíncrono (`S3StorageAdapter` usando `aioboto3`) para actuar como destino final de la información extraída. Esto permitirá a herramientas ETL (como AWS Athena o Glue) o entornos de analítica y Machine Learning (Jupyter, SageMaker) consultar los datos de forma desacoplada. Este módulo y su estructuración exacta se encuentran actualmente en fase de análisis y diseño preliminar.
+### 2. Almacenamiento Asíncrono en Amazon S3
+- **Persistencia en S3 (Data Lake)**: Implementación de unData Lake asíncrono mediante `S3StorageRepository` and `JobBufferService`. Los resultados de scraping se acumulan en memoria RAM en un buffer ordenado por Job, y al alcanzar los límites (3MB o 60s) se vuelcan en formato JSON Lines (.jsonl) hacia S3. Esto permite a herramientas de análisis (Athena, Spark) consultar los datos directamente de forma desacoplada sin sobrecargar la base de datos operativa.
 
 ### 3. De-duplicación, Idempotencia y Observabilidad en Tiempo Real (Redis)
 - **Control de Duplicados**: Para evitar scraping doble y garantizar la idempotencia de las peticiones, se integrará un motor de memoria compartida ultrarrápido como **Redis** (o bases de datos similares).

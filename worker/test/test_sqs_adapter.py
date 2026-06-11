@@ -53,12 +53,12 @@ async def test_adapter_acknowledge_batch_logs_partial_failures():
     mock_client.delete_message_batch.assert_called_once()
 
 
-async def test_adapter_fetch_parallel_cancellation():
-    """Valida que al hacer fetch > 10, si una petición asíncrona trae datos, se cancelen las demás."""
+async def test_adapter_fetch_parallel_awaits_all():
+    """Valida que al hacer fetch > 10, todas las peticiones asíncronas se esperen usando gather para evitar fugas de visibilidad."""
     adapter = SQSAioBotoAdapter(endpoint_url="http://mock", queue_url="http://queue")
     
     # Simulamos que la primera petición paralela responde rápido con tareas,
-    # y la segunda simula quedar colgada (no responde de inmediato).
+    # y la segunda simula quedar colgada temporalmente (no responde de inmediato).
     task_mock = ScrapingTask(
         job_id="j", batch_id="b", task_id="t-01", url="https://x.com",
         parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
@@ -69,8 +69,8 @@ async def test_adapter_fetch_parallel_cancellation():
         return [task_mock]
         
     async def mock_fetch_slow(size):
-        # Simula long polling lento
-        await asyncio.sleep(10.0)
+        # Simula un pequeño retraso
+        await asyncio.sleep(0.05)
         return []
 
     # Mockeamos _fetch_single_batch para que asigne las respuestas en orden
@@ -90,7 +90,7 @@ async def test_adapter_fetch_parallel_cancellation():
     
     assert len(tasks) == 1
     assert tasks[0].task_id == "t-01"
-    # El test debe terminar de inmediato porque la segunda tarea lenta fue cancelada asíncronamente
+    # El test finaliza confirmando que ambas peticiones asíncronas fueron completadas (gather)
 
 
 async def test_adapter_heartbeat_error_handling():

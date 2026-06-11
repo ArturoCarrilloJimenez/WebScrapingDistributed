@@ -21,7 +21,8 @@ El usuario envía una carga masiva de trabajo y recibe una respuesta instantáne
 | **Contratos de Datos Robustos**   | Validación estricta mediante **Pydantic** en todas las fases del ciclo de vida del mensaje, garantizando consistencia en las colas.               |
 | **Rotación de Proxies Avanzada**  | Soporte para pools de proxies estáticos y gateways residenciales (backconnect) con persistencia de sesión por tarea (**Sticky Sessions**).        |
 | **Resiliencia & Backoff Dinámico**| Mecanismo de reintentos inteligente con cálculo de tiempo de espera dinámico adaptado a la categoría del error (bloqueos, timeouts, caídas 5xx).  |
-| **Infraestructura Cloud-Native**  | Preparado para entornos AWS (SQS/DLQ) y emulado localmente de forma eficiente con **Floci** (emulador open source sin restricciones de LocalStack).|
+| **Almacenamiento en S3 (Sink)**   | Estructuración en JSON Lines (.jsonl) y guardado asíncrono en S3 mediante un buffer en memoria RAM para amortizar costes de red y CPU.       |
+| **Infraestructura Cloud-Native**  | Preparado para entornos AWS (SQS/S3/DLQ) y emulado localmente de forma eficiente con **Floci** (emulador open source sin restricciones de LocalStack).|
 
 ---
 
@@ -72,6 +73,7 @@ El **Producer** es una API de alto rendimiento desarrollada con **FastAPI**. No 
 - **Desacoplamiento total**: El Producer puede encolar 100.000 tareas en segundos; el clúster de Workers las irá procesando a su propio ritmo de manera fluida.
 - **Garantía de entrega (At-least-once)**: Si un Worker falla a mitad del procesamiento de una tarea, el mensaje vuelve a estar visible en la cola después de que expire su tiempo de visibilidad para ser procesado por otro Worker saludable.
 - **DLQ (Dead Letter Queue)**: Cuando una tarea supera el número máximo de reintentos (`max_retries`, por defecto 10), SQS la desvía automáticamente a la cola de descarte (`scraping-tasks-dlq`). Esto evita que un error persistente (como una URL inexistente o formato corrupto) sature los hilos de ejecución indefinidamente.
+- **Fetch Concurrente Seguro**: El adaptador SQS realiza peticiones paralelas de descarga y espera a que todas finalicen (`asyncio.gather`), evitando cancelaciones abruptas de peticiones en vuelo que causarían "fugas de visibilidad" en SQS.
 
 ---
 
@@ -81,11 +83,12 @@ El **Worker** es un microservicio autónomo y altamente concurrente encargado de
 
 #### Características Clave del Worker:
 - **Concurrencia Controlada**: Utiliza un semáforo asíncrono (`asyncio.Semaphore`) limitado por `WORKER_NUM_MAX_CONCURRENT_TASKS` para evitar saturar el ancho de banda local y prevenir bloqueos de CPU por exceso de tareas en vuelo.
-- **Apagado Seguro (Graceful Shutdown)**: Captura las señales de parada del sistema (`SIGINT`, `SIGTERM`). Ante una señal de detención, el motor:
+- **Apagado Seguro (Graceful Shutdown)**: Captura las señales de parada del sistema (`SIGINT`, `SIGTERM`). Ante una señal de detención, el motor de forma coordinada:
   1. Deja de recibir nuevas tareas de SQS de forma inmediata.
   2. Espera a que todas las tareas en vuelo terminen de procesarse de manera limpia.
-  3. Ejecuta un vaciado rápido (**flush**) de los ACKs restantes acumulados en su buffer de memoria hacia SQS.
-  4. Cierra las conexiones y sockets del cliente asíncrono de forma controlada.
+  3. Realiza un vaciado síncrono del buffer de memoria (**drenado de RAM**) hacia S3 para todos los trabajos activos, previniendo la pérdida de datos volátiles.
+  4. Encola los ACKs de los mensajes correspondientes y espera a que el flusher asíncrono termine de vaciar la cola de borrados en SQS.
+  5. Cierra las conexiones y sockets del cliente de almacenamiento (S3) y del broker (SQS) de forma limpia.
 - **Factoría de Parsers Dinámica (`ParserFactory`)**: Mapea dinámicamente el campo `parser_type` de la tarea al motor de extracción adecuado. Actualmente integra:
   - `STATIC_CSS`: Extractor altamente eficiente basado en `aiohttp` y selectores CSS/XPath configurados bajo demanda.
 - **Buffer asíncrono de ACKs (`_ack_flusher`)**: Para evitar el coste de borrar mensajes uno a uno en SQS, el Worker los acumula en una cola en memoria y una tarea secundaria los elimina en lotes periódicos de hasta 10 mensajes, reduciendo el tráfico de red de bajada.
@@ -112,6 +115,36 @@ Ambos modos son compatibles con **Sticky Sessions** (Sesiones Adherentes). Si la
 
 ---
 
+### 5. Almacenamiento y Buffer de Datos (S3Data Lake)
+
+El sistema implementa un sumidero de datos (**Data Sink**) asíncrono y resiliente basado en Amazon S3. El objetivo es estructurar, empaquetar y almacenar los datos raspados de forma masiva reduciendo al mínimo el tráfico y las llamadas de I/O de red.
+
+#### Componentes delData Lake:
+- **BaseStorageRepository / S3StorageRepository**: Interfaz de almacenamiento abstracto que conecta asíncronamente con Amazon S3 mediante la librería `aioboto3`. Utiliza una única conexión persistente (Singleton) optimizada para soportar un pool de hasta 250 conexiones simultáneas con reintentos automáticos.
+- **Buffer de Trabajos (`JobBufferService`)**: Un servicio intermedio que acumula los resultados procesados (`ParseResult`) en la memoria RAM del Worker. Los registros se almacenan segregados por su identificador de trabajo (`job_id`).
+- **Serialización Anticipada**: Los datos se serializan a formato JSON inmediatamente al ser recibidos en memoria. Esto amortiza el coste de CPU y permite evaluar en tiempo real el tamaño acumulado en bytes, evitando picos de latencia de red.
+
+#### Criterios de Volcado (Flush):
+El buffer realiza la escritura a S3 cuando se cumple cualquiera de las siguientes condiciones:
+1. **Límite de tamaño**: El buffer de un Job alcanza o supera el tamaño configurado en bytes (por defecto, `3 MB` en `max_bytes`).
+2. **Límite de tiempo**: El buffer de un Job ha estado en memoria por más tiempo del configurado (por defecto, `60 segundos` en `max_seconds`).
+3. **Ticker Supervisor**: Un bucle asíncrono en segundo plano inspecciona la memoria RAM cada 5 segundos y fuerza el volcado de los buffers de baja frecuencia de entrada que hayan superado el tiempo de expiración.
+
+#### Particionado Hive en S3:
+El volcado masivo concatena los registros en formato **JSON Lines (.jsonl)** y los guarda utilizando una estructura de directorios compatible con motores de consulta analítica (como Athena o Spark) mediante particiones Hive:
+```
+raw-data/job_id={job_id}/part-{worker_id}-{timestamp}.jsonl
+```
+
+#### Garantía At-Least-Once:
+Para garantizar la integridad total de los datos y evitar pérdidas ante apagados abruptos:
+1. El Worker extrae los datos de la tarea.
+2. Los datos se inyectan en el `JobBufferService`.
+3. Al cumplirse un límite, los datos agrupados se escriben físicamente en S3.
+4. **Solo cuando la subida a S3 es exitosa**, las tareas correspondientes se envían a la cola `ack_queue` para ser eliminadas de SQS. Si la subida a S3 falla, las tareas no se confirman y volverán a estar visibles en la cola SQS de manera automática tras expirar su Visibility Timeout.
+
+---
+
 ## 📊 Resumen de Componentes
 
 | Servicio | Rol | Protocolo / Transporte | Estado |
@@ -121,6 +154,7 @@ Ambos modos son compatibles con **Sticky Sessions** (Sesiones Adherentes). Si la
 | **Dead Letter** | Captura y cuarentena de tareas defectuosas | AWS SQS DLQ | **Completado** |
 | **Worker** | Consumo asíncrono, Concurrencia, Parsers, Reintentos | asyncio + aiohttp | **Completado** |
 | **Proxies** | Evasión de bloqueos, Sticky Sessions | Static Pool & Backconnect | **Completado** |
+| **Almacenamiento** | Data Lake (JSON Lines particionado por Job) | aioboto3 (S3 API) | **Completado** |
 
 ---
 
@@ -145,9 +179,11 @@ WebScrapingDistributed/
 │   ├── dependencies/               # Contenedor de dependencias del Worker (SQS, Proxies, Clientes)
 │   ├── infrastructure/             # Adaptadores de infraestructura
 │   │   ├── network/                # Gestión de red y rotación de proxies (StaticPool, Backconnect)
+│   │   ├── storage/                # Persistencia de datos raspados (Base, S3Adapter)
 │   │   └── task/                   # Adaptador de consumo asíncrono de SQS
 │   ├── scraping/                   # Motores de análisis y extracción
 │   │   ├── parsers/                # Motores de parseo (StaticCSSParser) y factorías
+│   │   ├── services/               # Servicios de scraping (JobBufferService)
 │   │   ├── controller.py           # Orquestador de consumo, concurrencia y tolerancia a fallos
 │   │   └── exceptions.py           # Clasificación de excepciones (Fatal, Blocked, Timeout)
 │   ├── test/                       # Tests unitarios y de integración de lógica y reintentos
@@ -204,6 +240,12 @@ AWS_SECRET_ACCESS_KEY=test
 # SQS
 SQS_ENDPOINT_URL=http://emulator-aws:4566
 SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
+SQS_REGION=us-east-1
+
+# S3
+S3_ENDPOINT_URL=http://emulator-aws:4566
+S3_BUCKET_NAME=scraping-raw-data
+S3_REGION=us-east-1
 
 # Servicios
 NUM_MAX_TASKS=10
@@ -291,7 +333,7 @@ uv run pytest
 - [x] **Módulo de Rotación de Proxies**: Soporte para Static Pool y Backconnect con Sticky Sessions.
 - [x] **Suite de Tests de Integración**: Cobertura de tests asíncronos y simulaciones de fallos en red.
 - [ ] **Parsers Dinámicos**: Implementación de extracción mediante Playwright/Selenium para webs dinámicas con renderizado JS.
-- [ ] **Almacenamiento en S3**: Integración asíncrona para guardar el contenido o capturas extraídas directamente en buckets.
+- [x] **Almacenamiento en S3**: Integración asíncrona para guardar el contenido extraído en formato JSON Lines segregado por Job con control de reintentos.
 - [ ] **Base de Datos de Estado**: Guardado de estados intermedios y de-duplicación agresiva de URLs para evitar procesados dobles.
 - [ ] **Despliegue Continuo (CD)** automatizado para subidas directas a la nube.
 - [ ] **Migración a K8s & Terraform**: Despliegue en clusters elásticos basados en Kubernetes con aprovisionamiento IaaC.
