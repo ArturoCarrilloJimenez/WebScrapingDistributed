@@ -20,7 +20,7 @@ class StaticPoolProxyProvider(BaseProxyProvider):
         self._is_sleeping = False
         self._monitor_task = None
 
-        self._activity_event = None
+        self._activity_event = asyncio.Event()
 
     def get_proxy_url(self, sticky_session_id: str = None) -> str | None:
         if not self.proxy_urls_all:
