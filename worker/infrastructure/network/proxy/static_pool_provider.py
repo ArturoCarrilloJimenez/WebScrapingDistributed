@@ -20,6 +20,8 @@ class StaticPoolProxyProvider(BaseProxyProvider):
         self._is_sleeping = False
         self._monitor_task = None
 
+        self._activity_event = asyncio.Event()
+
     def get_proxy_url(self, sticky_session_id: str = None) -> str | None:
         if not self.proxy_urls_all:
             return None
@@ -39,8 +41,9 @@ class StaticPoolProxyProvider(BaseProxyProvider):
         # 3. Si estaba en standby, despertarlo
         if self._is_sleeping:
             self._is_sleeping = False
-            log.info("Petición recibida. Reactivando bucle de salud de proxies...")
-
+            if self._activity_event:
+                self._activity_event.set()
+            log.info("Petición recibida. Reactivando bucle de salud de proxies de forma instantánea.")
         # 4. Si se proporciona un sticky_session_id, se asigna consistentemente al mismo proxy
         if sticky_session_id:
             idx = hash(sticky_session_id) % len(self.proxy_urls_all)
@@ -82,7 +85,10 @@ class StaticPoolProxyProvider(BaseProxyProvider):
                     log.warning(
                         "Inactividad de peticiones detectada. Suspendiendo pings de proxies para ahorrar ancho de banda.")
                     self._is_sleeping = True
-                await asyncio.sleep(5.0)
+                    self._activity_event.clear()
+
+                # Esperamos hasta que haya actividad para reactivar el loop
+                await self._activity_event.wait()
                 continue
 
             # Realizar pings en paralelo

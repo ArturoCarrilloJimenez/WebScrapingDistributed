@@ -1,6 +1,6 @@
-from typing import Any, Dict
 from bs4 import BeautifulSoup
 from scraping.exceptions import ErrorCategory, ScrapingError
+from scraping.interfaces.interfaces import ParseResult
 from .base import BaseParser
 from shared.models import ScrapingTask
 from infrastructure.network.client import SecureNetworkClient
@@ -11,7 +11,7 @@ class StaticCSSParser(BaseParser):
         super().__init__()
         self.network_client = network_client
 
-    async def parse(self, task: ScrapingTask) -> Dict[str, Any]:
+    async def parse(self, task: ScrapingTask) -> ParseResult:
         """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
         selectors = task.parser_config.get("selectors", {})
 

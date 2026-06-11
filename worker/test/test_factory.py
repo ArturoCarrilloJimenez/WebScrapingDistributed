@@ -24,3 +24,33 @@ def test_factory_raises_value_error_for_unknown_parser():
         factory.get_parser("ai_semantic_parser")
         
     assert "No existe implementación para" in str(exc_info.value)
+
+
+def test_base_parser_prepare_result():
+    from scraping.parsers.base import BaseParser
+    from shared.models import ScrapingTask
+    from scraping.interfaces.interfaces import ParseResult
+    import asyncio
+
+    class DummyParser(BaseParser):
+        async def parse(self, task):
+            await super().parse(task)
+
+    parser = DummyParser()
+    task = ScrapingTask(
+        job_id="j_01", batch_id="b_01", task_id="t_01",
+        url="https://example.com", parser_type="static_css",
+        parser_config={"selectors": {"headline": "h1.title"}}
+    )
+    
+    # Cover _prepare_result
+    result = parser._prepare_result(task, {"headline": "Value"})
+    assert isinstance(result, ParseResult)
+    assert result.task == task
+    assert result.data == {"headline": "Value"}
+
+    # Cover abstract parse method pass
+    try:
+        asyncio.run(parser.parse(task))
+    except Exception:
+        pass

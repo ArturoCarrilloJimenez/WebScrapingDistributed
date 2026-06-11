@@ -6,14 +6,16 @@ from shared.models import ScrapingTask
 from scraping.parsers import ParserFactory
 from config.settings import settings
 from scraping.exceptions import ErrorCategory, ScrapingError
+from scraping.services.storage_buffer import JobBufferService
 
 log = Logger("Worker Engine")
 
 
 class WorkerController:
-    def __init__(self, consumer: BaseConsumer, parser_factory: ParserFactory, max_concurrency: int = 5):
+    def __init__(self, consumer: BaseConsumer, parser_factory: ParserFactory, max_concurrency: int = 5, buffer_service: JobBufferService = None):
         self.consumer = consumer
         self.parser_factory = parser_factory
+        self.buffer_service = buffer_service
         self.max_concurrency = max_concurrency
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.running = True
@@ -24,6 +26,7 @@ class WorkerController:
         self.ack_queue = asyncio.Queue()
         # Tarea de fondo que procesará los lotes de borrado
         self._ack_flusher_task = None
+        self._flusher_should_exit = False
 
         # Variable para almacenar la tarea principal del bucle de ejecución, útil para cancelarla desde el manejador de señales
         self._main_task = None
@@ -71,13 +74,21 @@ class WorkerController:
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
             log.info("Todas las tareas de scraping en vuelo han terminado.")
 
-        # PASO 2: Vaciar flusher asíncrono de ACKs
+        # PASO 2: Cerrar conexiones y limpiar buffers (drenar RAM a S3 y encolar ACKs)
+        if self.buffer_service:
+            await self.buffer_service.close()
+
+        # PASO 3: Indicar al flusher que puede terminar una vez se vacíe la cola
+        self._flusher_should_exit = True
+
+        # PASO 4: Vaciar flusher asíncrono de ACKs
         if self._ack_flusher_task:
             log.info("Esperando a que el flusher asíncrono vacíe la cola de ACKs en memoria...")
             await self._ack_flusher_task
 
-        # PASO 3: Cierre de sockets
-        log.info("Cerrando sockets y conexiones con el broker SQS...")
+        # PASO 5: Cerrar el consumidor (liberar recursos de red/SQS)
+        if hasattr(self.consumer, "close"):
+            await self.consumer.close()
 
     async def run(self) -> None:
         """Punto de entrada principal (El bucle infinito). Flujo plano y legible."""
@@ -85,7 +96,6 @@ class WorkerController:
         log.info(f"Engine arrancado. Concurrencia máx: {self.semaphore._value}")
         
         self._ack_flusher_task = asyncio.create_task(self._ack_flusher())
-
         try:
             while self.running:
                 try:
@@ -117,10 +127,10 @@ class WorkerController:
                 result = await parser.parse(task)
 
                 log.info(
-                    f"✅ Datos extraídos de {task.task_id} | URL: {task.url}: {result['data']}")
+                    f"Datos extraídos de {task.task_id} | URL: {task.url} | Parser: {task.parser_type.value}")
 
                 # Si todo sale bien, lo enviamos al buffer de ACK (borrar de SQS)
-                await self.ack_queue.put(task)
+                await self.buffer_service.add_record(result)
                 log.info(
                     f"Tarea completada y enviada para ACK: {task.task_id}")
             except ScrapingError as se:
@@ -135,7 +145,7 @@ class WorkerController:
         """
         log.info("Flusher de ACKs asíncrono inicializado.")
         
-        while self.running or not self.ack_queue.empty() or self._active_tasks:
+        while not self._flusher_should_exit or not self.ack_queue.empty():
             batch = await self._gather_batch()
             if batch:
                 await self._process_batch(batch)
@@ -222,13 +232,13 @@ class WorkerController:
             # Un bloqueo antibot requiere enfriar la IP / rotar proxy. Backoff agresivo + Jitter
             delay = min(30 * (2 ** task.retry_count), 300)
             log.warning(
-                f"🛡️ Bloqueo detectado en tarea {task.task_id}. Enfriando infraestructura por {delay}s.")
+                f"Bloqueo detectado en tarea {task.task_id}. Enfriando infraestructura por {delay}s.")
 
         elif category == ErrorCategory.SERVER_ERROR:
             # Tenías duda con el 500: SÍ se reintenta. Los errores 5xx (500, 502, 503) suelen ser
             # micro-caídas del servidor remoto o despliegues en caliente del objetivo.
             delay = 15 * task.retry_count
             log.warning(
-                f"⚙️ Error de servidor remoto en tarea {task.task_id}. Reintento en {delay}s.")
+                f"Error de servidor remoto en tarea {task.task_id}. Reintento en {delay}s.")
 
         await self.consumer.heartbeat(task, visibility_timeout=delay)

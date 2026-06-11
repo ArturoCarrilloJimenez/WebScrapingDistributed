@@ -64,22 +64,19 @@ class SQSAioBotoAdapter(BaseConsumer):
         return tasks, found_any
 
     async def _fetch_concurrently(self, fetch_sizes: List[int]) -> List[ScrapingTask]:
-        """Orquesta la concurrencia y maneja la cancelación por cortocircuito."""
+        """Orquesta la concurrencia esperando a que todas las peticiones terminen para evitar fugas de visibilidad."""
         fetch_tasks = [asyncio.create_task(
             self._fetch_single_batch(size)) for size in fetch_sizes]
-        pending = set(fetch_tasks)
+        
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        
         all_tasks = []
-
-        while pending:
-            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-            tasks, found_any = self._process_done_tasks(done)
-            all_tasks.extend(tasks)
-
-            if found_any:
-                for p in pending:
-                    p.cancel()
-                break
-
+        for res in results:
+            if isinstance(res, list):
+                all_tasks.extend(res)
+            elif isinstance(res, Exception):
+                log.error(f"Error en llamada paralela de fetch en SQS Adapter: {str(res)}")
+                
         return all_tasks
 
     async def fetch(self, batch_size: int = min(settings.num_max_tasks, 10)) -> List[ScrapingTask]:

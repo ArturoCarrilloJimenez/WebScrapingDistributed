@@ -3,6 +3,7 @@ import json
 import asyncio
 from unittest.mock import AsyncMock, patch
 from config.settings import settings
+from scraping.interfaces.interfaces import ParseResult
 
 pytestmark = pytest.mark.asyncio
 
@@ -36,10 +37,10 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
 
     # 2. Mockear la llamada de red saliente del Parser (mantenemos foco en la infraestructura)
     mock_parser = AsyncMock()
-    mock_parser.parse.return_value = {
-        "status": "success",
-        "data": {"titles": ["Noticia Extraída 1", "Noticia Extraída 2"]}
-    }
+    mock_parser.parse.side_effect = lambda task: ParseResult(
+        task=task,
+        data={"titles": ["Noticia Extraída 1", "Noticia Extraída 2"]}
+    )
 
     with patch.object(worker_controller.parser_factory, "get_parser", return_value=mock_parser):
 
@@ -62,6 +63,24 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
     # 5. Aseveraciones (Assertions)
     # Comprobamos que el Worker extrajo los datos y llamó al parser mapeando el payload correctamente
     mock_parser.parse.assert_called_once()
+
+    # Comprobamos que el archivo se persistió correctamente en S3
+    import boto3
+    s3_client = boto3.client("s3", region_name="us-east-1", endpoint_url=settings.s3_endpoint_url)
+    s3_objects = s3_client.list_objects_v2(Bucket=settings.s3_bucket_name)
+    assert "Contents" in s3_objects, "No se guardó el resultado del raspado en S3"
+    assert len(s3_objects["Contents"]) == 1, "Debería haber exactamente un objeto en S3"
+    
+    s3_key = s3_objects["Contents"][0]["Key"]
+    assert s3_key.startswith("raw-data/job_id=job_worker_test_001/"), f"Estructura Hive S3 incorrecta: {s3_key}"
+
+    # Leemos el objeto de S3 y verificamos su contenido JSON Lines
+    obj_data = s3_client.get_object(Bucket=settings.s3_bucket_name, Key=s3_key)
+    body_content = obj_data["Body"].read().decode("utf-8")
+    lines = [json.loads(line) for line in body_content.strip().split("\n") if line]
+    assert len(lines) == 1
+    assert lines[0]["task"]["task_id"] == "task_static_001"
+    assert lines[0]["data"]["titles"] == ["Noticia Extraída 1", "Noticia Extraída 2"]
 
     # Comprobamos que el flusher asíncrono funcionó: la cola SQS de Moto debe estar vacía
     sqs_response = sqs_mock.receive_message(
@@ -102,3 +121,83 @@ async def test_worker_loop_skips_when_concurrency_is_maxed(sqs_mock, worker_cont
         await dummy_task
     except asyncio.CancelledError:
         pass
+
+async def test_graceful_shutdown_with_s3_upload(sqs_mock, worker_controller):
+    """
+    Test de cerrado seguro: Verifica que si el motor se apaga con datos en RAM (buffer de storage),
+    estos se envíen a S3 (save) y luego a la cola de ACKs para confirmar a SQS, sin dejar memoria huérfana.
+    """
+    # Override concurrency for testing to avoid concurrent SQS fetch requests blocking Moto
+    worker_controller.max_concurrency = 5
+    worker_controller.semaphore = asyncio.Semaphore(5)
+
+    # 1. Configuramos el mock de S3 para interceptar la subida
+    mock_repository = AsyncMock()
+    worker_controller.buffer_service.repository = mock_repository
+
+    # 2. Publicamos un mensaje en SQS
+    task_payload = {
+        "job_id": "job_shutdown_test_001",
+        "batch_id": "batch_shutdown_test_001",
+        "task_id": "task_shutdown_001",
+        "url": "https://example.com/noticias",
+        "parser_type": "static_css",
+        "parser_config": {"selectors": {"titles": "h2"}},
+        "retry_count": 0,
+        "max_retries": 3
+    }
+    sqs_mock.send_message(
+        QueueUrl=settings.sqs_queue_url,
+        MessageBody=json.dumps(task_payload)
+    )
+
+    # 3. Mockear el Parser para que retorne un resultado
+    mock_parser = AsyncMock()
+    mock_parser.parse.side_effect = lambda task: ParseResult(
+        task=task,
+        data={"titles": ["Noticia 1"]}
+    )
+
+    with patch.object(worker_controller.parser_factory, "get_parser", return_value=mock_parser):
+        # Lanzamos el motor asíncronamente
+        worker_task = asyncio.create_task(worker_controller.run())
+
+        # Esperamos a que el parser sea llamado (se procese la tarea)
+        for _ in range(80):
+            if mock_parser.parse.call_count > 0:
+                break
+            await asyncio.sleep(0.1)
+        
+        # Verificamos que el parser se llamó
+        assert mock_parser.parse.call_count == 1
+
+        # En este punto, el resultado de la tarea está en el buffer de memoria del JobBufferService,
+        # pero NO ha sido subido a S3 ni enviado a la ack_queue porque el buffer tiene un timeout de 60s
+        # y no se ha llenado (max_bytes).
+        # Verificamos que no se ha llamado a save en S3 aún
+        mock_repository.save.assert_not_called()
+        
+        # Y la cola de ACKs del flusher está vacía
+        assert worker_controller.ack_queue.qsize() == 0
+
+        # 4. Iniciamos el cerrado seguro (Graceful Shutdown) llamando a stop()
+        worker_controller.stop()
+
+        # Esperamos que el motor termine rompiendo limpiamente
+        with pytest.raises(asyncio.CancelledError):
+            await worker_task
+
+    # 5. Aseveraciones post-apagado:
+    # A) Se debió haber llamado a la subida de S3 (save) al drenar la memoria en el close() del buffer service
+    mock_repository.save.assert_called_once()
+    
+    # B) Los datos debieron haber sido enviados a SQS como ACK y borrados de la cola
+    # (El flusher procesó la ack_queue después del close y vació SQS)
+    sqs_response = sqs_mock.receive_message(
+        QueueUrl=settings.sqs_queue_url,
+        MaxNumberOfMessages=1
+    )
+    assert "Messages" not in sqs_response, "El mensaje no fue borrado de SQS"
+    
+    # C) La cola de ACKs en memoria debe estar completamente vacía (sin leaks de memoria)
+    assert worker_controller.ack_queue.qsize() == 0

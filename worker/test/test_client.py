@@ -47,7 +47,7 @@ async def test_client_pool_lru_eviction():
 
 async def test_client_jitter_rotation():
     """Valida que si una sesión supera su límite dinámico de solicitudes, se cierre y rote."""
-    # Jitter límite configurado entre 2 y 2 solicitudes para ser determinista
+    # Jitter límite configurado rígidamente entre 2 y 2 solicitudes para ser determinista
     client = SecureNetworkClient(min_requests_per_session=2, max_requests_per_session=2)
     
     async def mock_aenter(self):
@@ -59,20 +59,21 @@ async def test_client_jitter_rotation():
     with patch.object(AsyncSession, "__aenter__", mock_aenter), \
          patch.object(AsyncSession, "__aexit__", mock_aexit):
          
-        # Primera petición: Crea la sesión (count=0)
+        # Primera petición: Crea la sesión (El pool inicializa la telemetría en count=1)
         session_a = await client.get_session("https://example.com")
         
-        # Segunda petición: Reutiliza la sesión (count=1)
+        # Segunda petición: Reutiliza la sesión (El contador sube a 2. Sigue siendo <= limit)
         session_b = await client.get_session("https://example.com")
         assert session_a is session_b
         
-        # Tercera petición: Reutiliza la sesión (count=2)
+        # Tercera petición: El contador sube a 3. Como 3 > 2 (limit), la sesión antigua
+        # se desaloja con gracia de inmediato y se genera una nueva en la misma llamada.
         session_c = await client.get_session("https://example.com")
-        assert session_c is session_a
+        assert session_c is not session_a  # <- REGLA L5: Ya ha rotado aquí
         
-        # Cuarta petición: Supera el límite de 2. La sesión debe cerrarse y crearse otra nueva.
+        # Cuarta petición: Reutiliza la nueva sesión creada en el paso anterior
         session_d = await client.get_session("https://example.com")
-        assert session_d is not session_a
+        assert session_d is session_c
         
         await client.close()
 
@@ -136,7 +137,7 @@ async def test_client_cleanup_catches_close_exceptions():
     client._pool[("example.com", None, None)] = {
         "session": mock_bad_session,
         "last_used": time.time() - 100,
-        "request_count": 0,
+        "request_count": 1,
         "limit": 10
     }
     
