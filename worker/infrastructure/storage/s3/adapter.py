@@ -1,5 +1,3 @@
-from re import S
-
 from botocore.config import Config
 import aioboto3
 from shared.logging import Logger
@@ -11,9 +9,10 @@ log = Logger("S3 Storage Repository")
 
 
 class S3StorageRepository(BaseStorageRepository):
-    def __init__(self, endpoint_url: str, bucket_name: str, region: str = "us-east-1"):
+    def __init__(self, endpoint_url: str, bucket_name: str, prefix_raw_data: str = "raw-data", region: str = "us-east-1"):
         self.endpoint_url = endpoint_url
         self.bucket_name = bucket_name
+        self.prefix_raw_data = prefix_raw_data
         self.region = region
 
         self.session = aioboto3.Session()
@@ -55,18 +54,18 @@ class S3StorageRepository(BaseStorageRepository):
         Escribe los bytes del fragmento acumulado sin evaluar estados internos ni cerrojos.
         """
         client = await self._get_client()
-
+        new_key = f"{self.prefix_raw_data}/{key}"
         try:
             await client.put_object(
                 Bucket=self.bucket_name,
-                Key=key,
+                Key=new_key,
                 Body=body
             )
             log.info(
-                f"Bloque de datos (.jsonl) persistido con éxito en S3. Ruta: {key}")
+                f"Bloque de datos (.jsonl) persistido con éxito en S3. Ruta: {new_key}")
         except Exception as e:
             log.error(
-                f"Error de red al escribir objeto en S3 bajo la clave [{key}]: {e}")
+                f"Error de red al escribir objeto en S3 bajo la clave [{new_key}]: {e}")
             raise
 
     async def close(self) -> None:

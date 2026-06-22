@@ -30,6 +30,7 @@ services:
 
       - S3_ENDPOINT_URL=http://emulator-aws:4566
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_PREFIX_RAW_DATA=${S3_PREFIX_RAW_DATA}
       - S3_REGION=${S3_REGION}
 
       - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}

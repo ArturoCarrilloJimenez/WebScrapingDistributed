@@ -1,0 +1,12 @@
+[project]
+name = "jobs"
+version = "0.1.0"
+description = "Script programados como job para el sistema de scraping"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aioboto3>=15.5.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.1",
+    "shared"
+]
