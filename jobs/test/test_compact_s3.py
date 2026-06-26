@@ -154,8 +154,8 @@ async def test_process_job_execute(s3_mock):
     assert len(resp["Contents"]) == 1
     assert resp["Contents"][0]["Key"].endswith(".parquet")
 
-# 6. Test process_job lookahead (elastic chunking absorbed vs split)
-async def test_process_job_lookahead_elastic_and_split(s3_mock):
+# 6. Test process_job file splitting based on size
+async def test_process_job_file_splitting(s3_mock):
     now = datetime.datetime.now(datetime.timezone.utc)
     
     # Setup two task lines
@@ -182,29 +182,28 @@ async def test_process_job_lookahead_elastic_and_split(s3_mock):
         inactive_time=datetime.timedelta(hours=1)
     )
     
-    # CASE A: Remaining size fits within elastic tolerance (TOLERANCIA_COLA=1000)
-    # MAX_RECORDS_PER_FILE is set to 1 so p1.jsonl (1 record) hits the limit, but because p2.jsonl is small (size fits), it absorbs it in the same file!
+    # CASE A: Large MAX_FILE_SIZE_BYTES -> 1 file
     with patch("compact_s3.MIN_INACTIVITY_SECONDS", 0), \
-         patch("compact_s3.MAX_RECORDS_PER_FILE", 1), \
-         patch("compact_s3.TOLERANCIA_COLA", 1000):
+         patch("compact_s3.MAX_FILE_SIZE_BYTES", 100 * 1024 * 1024), \
+         patch("compact_s3.CHUNK_WRITE_SIZE", 1):
         
         semaphore = asyncio.Semaphore(1)
         client_ctx = await get_aioboto_client()
         async with client_ctx as client:
             await compact_s3.process_job(client, job, semaphore)
             
-    # Should create exactly 1 Parquet file (absorbed)
+    # Should create exactly 1 Parquet file
     resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="compacted-data/job_id=job1/")
     assert len(resp.get("Contents", [])) == 1
     
     # Clean up compacted output for Case B
     s3_mock.delete_objects(Bucket="test-bucket", Delete={'Objects': [{'Key': resp["Contents"][0]["Key"]}]})
 
-    # CASE B: Remaining size exceeds tolerance (TOLERANCIA_COLA=1)
-    # Remaining size of p2.jsonl is larger than 1, so it splits into 2 Parquet files!
+    # CASE B: Very small MAX_FILE_SIZE_BYTES -> Split into 2 Parquet files
     with patch("compact_s3.MIN_INACTIVITY_SECONDS", 0), \
-         patch("compact_s3.MAX_RECORDS_PER_FILE", 1), \
-         patch("compact_s3.TOLERANCIA_COLA", 1):
+         patch("compact_s3.MAX_FILE_SIZE_BYTES", 1), \
+         patch("compact_s3.CHUNK_WRITE_SIZE", 1), \
+         patch("compact_s3.TOLERANCIA_COLA_BYTES", 0):
         
         semaphore = asyncio.Semaphore(1)
         client_ctx = await get_aioboto_client()
@@ -252,11 +251,21 @@ async def test_main_flow(s3_mock):
     assert "Contents" not in resp_raw
 
 
-async def test_sync_serialize_to_parquet():
+async def test_write_chunk_to_file(tmp_path):
     import pyarrow as pa
+    import pyarrow.parquet as pq
     schema = pa.schema([pa.field("a", pa.int64())])
     data = {"a": [1, 2, 3]}
-    result = compact_s3._sync_serialize_to_parquet(schema, data)
-    assert isinstance(result, bytes)
-    assert result.startswith(b"PAR1")
+    
+    file_path = tmp_path / "test.parquet"
+    writer = pq.ParquetWriter(str(file_path), schema=schema)
+    try:
+        compact_s3._write_chunk_to_file(writer, schema, data)
+    finally:
+        writer.close()
+        
+    # Read back to verify
+    table = pq.read_table(str(file_path))
+    assert table.column("a").to_pylist() == [1, 2, 3]
+
 

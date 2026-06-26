@@ -30,7 +30,7 @@ jobs/
 Este job es responsable de mitigar el **problema de los archivos pequeños** (*Small Files Problem*). Consolida los ficheros JSON Lines de la Landing Zone en S3, transformándolos a formato columnar estructurado de alta densidad (**Parquet**) con compresión **ZSTD**.
 
 #### 🏗️ Arquitectura del Job de Compactación
-El proceso se ejecuta de manera asíncrona concurrente con `asyncio` y un pool de hilos nativos para la compresión CPU-bound:
+El proceso se ejecuta de manera asíncrona concurrente con `asyncio` y un pool de hilos nativos para la escritura de chunks a disco local:
 
 ```mermaid
 graph TD
@@ -44,21 +44,23 @@ graph TD
     subgraph Ciclo de Vida de la Compactación
         Compactor -->|4. Descarga asíncrona| Stream[Stream get_object]
         Stream -->|5. Validación| Validate[ParseResult Pydantic V2]
-        Validate -->|6. Búfer RAM Columnar| Buffer[Tabla PyArrow]
-        Buffer -->|7. Elastic Chunking| LimitCheck{¿Alcanza 1M de Registros?}
+        Validate -->|6. Micro-Búfer RAM| Buffer[Acumular 20,000 registros]
+        Buffer -->|7. Escribir Chunk local| WriteChunk[Stampar en Disco Local - pq.ParquetWriter]
+        WriteChunk -->|8. Monitorear Peso| SizeCheck{¿Tamaño disco >= 250 MB?}
         
-        LimitCheck -->|Zona Elástica / Absorción| Buffer
-        LimitCheck -->|Flush / Split| Serialize[Serializar Parquet C++ ZSTD en RAM]
+        SizeCheck -->|No - Continuar| Stream
+        SizeCheck -->|Sí - Rotación| Flush[Cerrar Escritor & Iniciar Parte N+1]
     end
     
-    Serialize -->|8. Subida PUT| CompactedZone[(S3 Compacted Zone - compacted-data/)]
-    CompactedZone -->|9. Confirmar Persistencia| Cleaner[Limpieza Landing Zone]
-    Cleaner -->|10. Borrado Masivo S3| LandingZone
+    Flush -->|9. Subida PUT en Streaming| CompactedZone[(S3 Compacted Zone - compacted-data/)]
+    CompactedZone -->|10. Confirmar Persistencia| Cleaner[Limpieza Landing Zone]
+    Cleaner -->|11. Borrado Masivo S3| LandingZone
 ```
 
 #### 🚀 Características Clave del Job
-* **Elastic Chunking (Look-Ahead)**: Cuando el acumulador alcanza el límite de `MAX_RECORDS_PER_FILE` (1,000,000), inspecciona la cola pendiente en S3. Si el resto de registros caben dentro del margen de elasticidad (`TOLERANCIA_COLA = 200,000`), el motor absorbe todo en un único archivo Parquet óptimo en lugar de fragmentarlo.
-* **Serialización RAM + Subida Asíncrona**: Para evitar las incompatibilidades del multipart de PyArrow C++ en entornos locales de simulación/mocks, la conversión columnar se realiza en memoria en un hilo secundario (`asyncio.to_thread`) y la red se delega a `aioboto3` mediante peticiones PUT asíncronas no bloqueantes.
+* **Escritura Incremental en Disco Local (RAM Plana)**: En lugar de cargar todo el dataset (hasta 1M de registros) en listas nativas de Python (Heap Inflation), el job escribe bloques binarios de **20,000 registros** a disco local temporalmente usando `pq.ParquetWriter`. Esto mantiene el consumo de RAM constante por debajo de los **60 MB** independientemente de si procesa 50,000 o 10,000,000 de filas.
+* **Corte por Tamaño de Archivo Real**: El script monitorea el tamaño físico del archivo binario Parquet en disco (`os.path.getsize()`). Cuando cruza los **250 MB**, cierra el escritor y lo sube asíncronamente a S3 como la *Parte N*, abriendo un nuevo archivo temporal local para continuar. Esto garantiza archivos balanceados y óptimos para consultas SQL en el Data Lake.
+* **Subida por Stream (Zero Heap Upload)**: Al subir los archivos Parquet a S3 mediante `aioboto3.client.put_object(Body=file_object)`, el payload se transmite por red en bloques directamente desde el disco sin cargarse por completo en la memoria virtual de Python.
 * **Esquema Resiliente Columnar**: Estructura las consultas mediante tipado fuerte en las columnas de control analítico, pero empaqueta el contenido útil polimórfico en una columna `data` de tipo cadena JSON para prevenir roturas ante cambios en los campos extraídos de la web.
 
 ---

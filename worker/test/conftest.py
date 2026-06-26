@@ -23,26 +23,21 @@ def aws_credentials():
 
 
 @pytest.fixture(scope="session")
-def moto_sqs_port():
+def moto_sqs_server():
     """
-    Reserva dinámicamente un puerto libre asignado por el sistema operativo.
-    Soluciona de raíz la ausencia del atributo '.port' en el ThreadedMotoServer.
+    Levanta un servidor HTTP local en memoria que simula AWS SQS de forma real.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture(scope="session")
-def moto_sqs_server(moto_sqs_port):
-    """
-    Levanta un servidor HTTP local en memoria que simula AWS SQS de forma real
-    utilizando el puerto libre previamente reservado.
-    """
-    server = ThreadedMotoServer(ip_address="127.0.0.1", port=moto_sqs_port)
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()
     yield server
     server.stop()
+
+
+@pytest.fixture(scope="session")
+def moto_sqs_port(moto_sqs_server):
+    """Obtiene el puerto dinámico asignado al servidor Moto."""
+    _, port = moto_sqs_server.get_host_and_port()
+    return port
 
 
 @pytest.fixture(scope="function")

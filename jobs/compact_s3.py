@@ -1,14 +1,14 @@
 import asyncio
 import datetime
 import json
-from typing import List, Dict, Any
+import os
+from typing import List, Dict, Any, AsyncIterator
 import uuid
 
 import aioboto3
 from botocore.config import Config
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pyarrow.fs import S3FileSystem
 from shared.logging import Logger
 
 from config.settings import settings
@@ -19,8 +19,14 @@ log = Logger("Compactar S3")
 # Umbrales y límites de compactación
 MIN_BYTES_FOR_COMPACTION = 300 * 1024 * 1024  # 300 MB
 MIN_INACTIVITY_SECONDS = 60 * 30             # 30 Minutos
-MAX_RECORDS_PER_FILE = 1_000_000
-TOLERANCIA_COLA = 200_000  # 20% de elasticidad sobre el bloque óptimo
+CHUNK_WRITE_SIZE = 20_000                    # Número de registros por lote intermedio en RAM antes de escribir a disco
+MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024      # 250 MB. Cuando el archivo en disco supera esta cota, se cierra y sube
+TOLERANCIA_COLA_BYTES = 50 * 1024 * 1024     # 50 MB. Si la cola remanente es menor a este tamaño, se absorbe en el archivo actual
+
+# Directorio temporal local en el workspace
+JOBS_ROOT = os.path.dirname(os.path.abspath(__file__))
+TMP_DIR = os.path.join(JOBS_ROOT, "tmp")
+os.makedirs(TMP_DIR, exist_ok=True)
 
 
 def _get_client():
@@ -118,15 +124,37 @@ async def get_list_of_batches(client, job_prefix: str, semaphore: asyncio.Semaph
             raise
 
 
-def _sync_serialize_to_parquet(schema: pa.Schema, buffer_data: Dict[str, List[Any]]) -> bytes:
+def _write_chunk_to_file(writer: pq.ParquetWriter, schema: pa.Schema, buffer_data: dict) -> None:
     """
-    Serializa la tabla columnar en memoria a formato Parquet con compresión ZSTD.
+    Convierte el búfer de RAM en una tabla PyArrow y la escribe al disco local.
     """
-    import io
     table = pa.Table.from_pydict(buffer_data, schema=schema)
-    buf = io.BytesIO()
-    pq.write_table(table, buf, compression='zstd')
-    return buf.getvalue()
+    writer.write_table(table)
+
+
+async def _upload_compacted_file(
+    client,
+    local_path: str,
+    job_id: str,
+    part_idx: int,
+    first_date: datetime.datetime
+) -> None:
+    """
+    Sube el archivo Parquet local a S3 de forma asíncrona y no bloqueante.
+    """
+    s3_key = (
+        f"{settings.s3_prefix_compacted_data}/"
+        f"job_id={job_id}/year={first_date.year}/month={first_date.month}/"
+        f"day={first_date.day}/part-{part_idx:04d}-{uuid.uuid4().hex[:6]}.parquet"
+    )
+    log.info(f"Subiendo archivo Parquet compactado Parte {part_idx} a S3: {s3_key}")
+    
+    # upload_file de aioboto3 es nativamente asíncrono y no bloqueante para archivos locales
+    await client.upload_file(
+        Filename=local_path,
+        Bucket=settings.s3_bucket_name,
+        Key=s3_key
+    )
 
 
 async def clear_job(client, job: ListOfJobs) -> None:
@@ -151,6 +179,14 @@ async def clear_job(client, job: ListOfJobs) -> None:
             f"Error crítico en la purga del Job: {job.prefix} | Error: {e}")
 
 
+def _is_job_eligible(job: ListOfJobs) -> bool:
+    """
+    Evalúa si un job cumple con las condiciones mínimas para ser compactado
+    (supera el umbral de tamaño de bytes crudos o lleva inactivo más del tiempo establecido).
+    """
+    return job.total_bytes >= MIN_BYTES_FOR_COMPACTION or job.inactive_time.total_seconds() >= MIN_INACTIVITY_SECONDS
+
+
 def _get_compaction_schema() -> pa.Schema:
     """
     Retorna el esquema de PyArrow para la tabla del Data Lake compactado.
@@ -164,88 +200,99 @@ def _get_compaction_schema() -> pa.Schema:
     ])
 
 
-def _should_flush_elastic(
-    rows_in_segment: int,
-    bytes_in_segment: int,
-    current_batch_idx: int,
-    job: ListOfJobs,
-    job_id: str
-) -> bool:
+class JobCompactor:
     """
-    Evalúa si se debe realizar la compactación inmediata o si la cola restante de lotes
-    entra dentro de la tolerancia de elasticidad para absorberla y evitar el corte de archivo.
+    Clase de estado que encapsula la compactación incremental de registros 
+    para reducir la complejidad cognitiva de la función principal.
     """
-    if rows_in_segment < MAX_RECORDS_PER_FILE:
-        return False
+    def __init__(self, client, job: ListOfJobs, schema: pa.Schema, job_id: str):
+        self.client = client
+        self.job = job
+        self.schema = schema
+        self.job_id = job_id
+        
+        self.part_counter = 0
+        self.rows_in_current_file = 0
+        self.rows_in_chunk = 0
+        self.current_chunk_buffer = {field.name: [] for field in schema}
+        self.local_file_path = os.path.join(TMP_DIR, f"compact_{job_id}_{self.part_counter}.parquet")
+        self.writer = None
+        self.first_date = None
 
-    batches_restantes = job.batches[current_batch_idx + 1:]
-    bytes_remanentes_s3 = sum(b.size for b in batches_restantes)
+    def initialize_writer_if_needed(self, parse_result: ParseResult) -> None:
+        if self.writer is None:
+            self.writer = pq.ParquetWriter(self.local_file_path, schema=self.schema, compression='zstd')
+            first_date = parse_result.task.created_at
+            if first_date.tzinfo is None:
+                first_date = first_date.replace(tzinfo=datetime.timezone.utc)
+            self.first_date = first_date
 
-    bytes_por_registro = bytes_in_segment / rows_in_segment
-    filas_estimadas_restantes = bytes_remanentes_s3 / \
-        bytes_por_registro if bytes_por_registro > 0 else 0
+    def append_record(self, parse_result: ParseResult) -> None:
+        self.current_chunk_buffer["task_id"].append(parse_result.task.task_id)
+        self.current_chunk_buffer["url"].append(str(parse_result.task.url))
+        self.current_chunk_buffer["date"].append(parse_result.task.created_at)
+        self.current_chunk_buffer["data"].append(json.dumps(parse_result.data))
+        self.rows_in_chunk += 1
+        self.rows_in_current_file += 1
 
-    if filas_estimadas_restantes <= TOLERANCIA_COLA:
-        # Zona Elástica Detectada: Prohibimos el corte, permitimos expandir RAM temporalmente
-        log.info(
-            f"Look-Ahead en {job_id}: Cola estimada de {filas_estimadas_restantes:.0f} filas "
-            f"({bytes_remanentes_s3 / 1024 / 1024:.2f} MB) entra en la tolerancia del {TOLERANCIA_COLA}. Absorbiendo cola..."
-        )
-        return False
+    async def flush_current_chunk(self) -> None:
+        if self.rows_in_chunk > 0:
+            await asyncio.to_thread(_write_chunk_to_file, self.writer, self.schema, self.current_chunk_buffer)
+            self.current_chunk_buffer = {field.name: [] for field in self.schema}
+            self.rows_in_chunk = 0
 
-    return True
+    async def check_and_perform_split(self, b_idx: int) -> None:
+        if not os.path.exists(self.local_file_path):
+            return
+        if os.path.getsize(self.local_file_path) < MAX_FILE_SIZE_BYTES:
+            return
 
+        batches_restantes = self.job.batches[b_idx + 1:]
+        bytes_remanentes_s3 = sum(b.size for b in batches_restantes)
 
-async def _flush_buffer_to_s3(
-    client,
-    job_id: str,
-    schema: pa.Schema,
-    buffer_to_write: dict,
-    part_idx: int
-) -> None:
-    """
-    Serializa el búfer a formato Parquet con compresión ZSTD en un hilo de trabajo
-    y lo sube de forma asíncrona al bucket S3 configurado.
-    """
-    first_date = buffer_to_write["date"][0]
-    s3_key = (
-        f"{settings.s3_prefix_compacted_data}/"
-        f"job_id={job_id}/year={first_date.year}/month={first_date.month}/"
-        f"day={first_date.day}/part-{part_idx:04d}-{uuid.uuid4().hex[:6]}.parquet"
-    )
-    log.info(
-        f"Enviando streaming Parquet (ZSTD) Parte {part_idx} para el Job: {job_id}")
+        if bytes_remanentes_s3 > TOLERANCIA_COLA_BYTES:
+            await self.close_and_upload_current_file()
+            self.part_counter += 1
+            self.rows_in_current_file = 0
+            self.local_file_path = os.path.join(TMP_DIR, f"compact_{self.job_id}_{self.part_counter}.parquet")
 
-    # Serializar en un pool de hilos para no bloquear el bucle de eventos
-    parquet_bytes = await asyncio.to_thread(_sync_serialize_to_parquet, schema, buffer_to_write)
+    async def close_and_upload_current_file(self) -> None:
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+        if self.rows_in_current_file > 0:
+            await _upload_compacted_file(self.client, self.local_file_path, self.job_id, self.part_counter, self.first_date)
+            if os.path.exists(self.local_file_path):
+                os.remove(self.local_file_path)
+            self.part_counter += 1
+            self.rows_in_current_file = 0
 
-    # Subir los bytes a S3 usando el cliente asíncrono
-    await client.put_object(
-        Bucket=settings.s3_bucket_name,
-        Key=s3_key,
-        Body=parquet_bytes
-    )
+    def clean_local_file(self) -> None:
+        if self.writer is not None:
+            try:
+                self.writer.close()
+            except Exception:
+                pass
+        if os.path.exists(self.local_file_path):
+            try:
+                os.remove(self.local_file_path)
+            except Exception:
+                pass
 
 
 async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Semaphore) -> ListOfJobs | None:
     async with compaction_semaphore:
-        if job.total_bytes < MIN_BYTES_FOR_COMPACTION and job.inactive_time.total_seconds() < MIN_INACTIVITY_SECONDS:
+        if not _is_job_eligible(job):
             log.info(
                 f"Ignorando Job {job.prefix} | No cumple umbrales mínimos de tamaño o inactividad.")
             return None
 
+        job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
+        schema = _get_compaction_schema()
+        compactor = JobCompactor(client, job, schema, job_id)
+
         try:
-            log.info(
-                f"Iniciando procesamiento rotativo elástico de Job: {job.prefix}")
-            job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
-
-            schema = _get_compaction_schema()
-            columnar_buffer: Dict[str, List[Any]] = {
-                field.name: [] for field in schema}
-
-            part_counter = 0
-            rows_in_segment = 0
-            bytes_in_segment = 0
+            log.info(f"Iniciando compactación incremental en disco de Job: {job.prefix}")
 
             for b_idx, batch in enumerate(job.batches):
                 response = await client.get_object(Bucket=settings.s3_bucket_name, Key=batch.key)
@@ -255,51 +302,33 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
                         if not line:
                             continue
 
-                        bytes_in_segment += len(line)
                         line_data = json.loads(line.decode('utf-8'))
                         parse_result = ParseResult.model_validate(line_data)
 
-                        columnar_buffer["task_id"].append(
-                            parse_result.task.task_id)
-                        columnar_buffer["url"].append(
-                            str(parse_result.task.url))
-                        columnar_buffer["date"].append(
-                            parse_result.task.created_at)
-                        columnar_buffer["data"].append(
-                            json.dumps(parse_result.data))
+                        compactor.initialize_writer_if_needed(parse_result)
+                        compactor.append_record(parse_result)
 
-                        rows_in_segment += 1
-
-                        # PUNTO DE DECISIÓN CRÍTICO: ELASTIC CHUNKING LOOK-AHEAD
-                        if _should_flush_elastic(rows_in_segment, bytes_in_segment, b_idx, job, job_id):
-                            await _flush_buffer_to_s3(client, job_id, schema, columnar_buffer, part_counter)
-                            columnar_buffer = {field.name: []
-                                               for field in schema}
-                            part_counter += 1
-                            rows_in_segment = 0
-                            bytes_in_segment = 0
+                        if compactor.rows_in_chunk >= CHUNK_WRITE_SIZE:
+                            await compactor.flush_current_chunk()
+                            await compactor.check_and_perform_split(b_idx)
                 finally:
                     stream.close()
 
-            # CIERRE DE PROCESO: Guardar remanentes o colas absorbidas elásticamente
-            if columnar_buffer["task_id"]:
-                await _flush_buffer_to_s3(client, job_id, schema, columnar_buffer, part_counter)
-                part_counter += 1
+            # Guardar registros remanentes finales
+            await compactor.flush_current_chunk()
+            await compactor.close_and_upload_current_file()
 
-            del columnar_buffer
-
-            if part_counter == 0:
-                log.info(
-                    f"Job {job_id} no contenía registros analíticos válidos.")
+            if compactor.part_counter == 0:
+                log.info(f"Job {job_id} no contenía registros analíticos válidos.")
+                compactor.clean_local_file()
                 return None
 
-            log.info(
-                f"Job {job_id} consolidado globalmente de forma exitosa en {part_counter} parte(s).")
+            log.info(f"Job {job_id} consolidado globalmente de forma exitosa en {compactor.part_counter} parte(s).")
             return job
 
         except Exception as e:
-            log.error(
-                f"Fallo crítico al compactar Job: {job.prefix} | Error: {e}")
+            log.error(f"Fallo crítico al compactar Job: {job.prefix} | Error: {e}")
+            compactor.clean_local_file()
             raise
 
 
