@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [producer, worker]
+        service: [producer, worker, jobs]
 
     steps:
       - name: Checkout repository
@@ -82,6 +82,15 @@ jobs:
         with:
           name: reports-worker
           path: worker
+        continue-on-error: true
+
+
+        # Descarga el reporte de jobs directamente en la carpeta 'jobs/'
+      - name: Download Jobs Reports
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: reports-jobs
+          path: jobs
         continue-on-error: true
 
 
