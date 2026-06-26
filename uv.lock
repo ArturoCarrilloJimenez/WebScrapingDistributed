@@ -1022,6 +1022,14 @@ dependencies = [
     { name = "shared" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "moto", extra = ["s3", "server"] },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aioboto3", specifier = ">=15.5.0" },
@@ -1029,6 +1037,14 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "shared", editable = "shared" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "moto", extras = ["s3", "server"], specifier = ">=5.0.0" },
+    { name = "pytest", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
 ]
 
 [[package]]
@@ -1233,6 +1249,10 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+s3 = [
+    { name = "py-partiql-parser" },
+    { name = "pyyaml" },
+]
 server = [
     { name = "antlr4-python3-runtime" },
     { name = "aws-xray-sdk" },

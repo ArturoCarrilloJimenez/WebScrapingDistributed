@@ -11,3 +11,10 @@ dependencies = [
     "pydantic-settings>=2.14.1",
     "shared",
 ]
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "moto[s3,server]>=5.0.0",
+]
