@@ -103,7 +103,7 @@ class JobBufferService:
 
         # 2. Particionamiento estilo Hive explícito usando metadatos limpios
         timestamp = int(time.time())
-        key = f"job_id={job_id}/part-{self.worker_id}-{timestamp}.jsonl"
+        key = f"job_id={job_id}/part-{self.worker_id}-{timestamp}-{uuid.uuid4().hex[:6]}.jsonl"
 
         try:
             # 3. Operación de Red/Escritura contra el repositorio inyectado
