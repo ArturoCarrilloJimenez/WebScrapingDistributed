@@ -6,7 +6,6 @@ from typing import List, Dict, Any, AsyncIterator
 import uuid
 
 import aioboto3
-import anyio
 from botocore.config import Config
 import pyarrow as pa
 import pyarrow.parquet as pq
