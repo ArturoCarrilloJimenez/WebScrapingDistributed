@@ -19,8 +19,8 @@ log = Logger("Compactar S3")
 # Umbrales y límites de compactación
 MIN_BYTES_FOR_COMPACTION = 300 * 1024 * 1024  # 300 MB
 MIN_INACTIVITY_SECONDS = 60 * 30             # 30 Minutos
-MAX_RECORDS_PER_FILE = 1_000_000
-TOLERANCIA_COLA = 200_000  # 20% de elasticidad sobre el bloque óptimo
+MAX_RECORDS_PER_FILE = 100_000               # 100.000 registros por archivo
+TOLERANCIA_COLA = 20_000  # 20% de elasticidad sobre el bloque óptimo
 
 
 def _get_client():
