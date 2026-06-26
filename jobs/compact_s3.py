@@ -149,13 +149,12 @@ async def _upload_compacted_file(
     )
     log.info(f"Subiendo archivo Parquet compactado Parte {part_idx} a S3: {s3_key}")
     
-    # Subida en streaming directo desde disco local para evitar Heap Inflation en Python
-    with open(local_path, "rb") as f:
-        await client.put_object(
-            Bucket=settings.s3_bucket_name,
-            Key=s3_key,
-            Body=f
-        )
+    # upload_file de aioboto3 es nativamente asíncrono y no bloqueante para archivos locales
+    await client.upload_file(
+        Filename=local_path,
+        Bucket=settings.s3_bucket_name,
+        Key=s3_key
+    )
 
 
 async def clear_job(client, job: ListOfJobs) -> None:
