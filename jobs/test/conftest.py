@@ -10,11 +10,6 @@ jobs_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if jobs_root not in sys.path:
     sys.path.insert(0, jobs_root)
 
-# También añadimos la raíz del proyecto para importar 'config' y 'shared'
-project_root = os.path.abspath(os.path.join(jobs_root, ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
 from config.settings import settings
 
 @pytest.fixture(scope="session", autouse=True)
@@ -26,19 +21,18 @@ def aws_credentials():
     os.environ["DEFAULT_REGION_AWS"] = "us-east-1"
 
 @pytest.fixture(scope="session")
-def moto_s3_port():
-    """Reserva dinámicamente un puerto libre asignado por el sistema operativo."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-@pytest.fixture(scope="session")
-def moto_s3_server(moto_s3_port):
+def moto_s3_server():
     """Levanta un servidor HTTP local que simula AWS S3."""
-    server = ThreadedMotoServer(ip_address="127.0.0.1", port=moto_s3_port)
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()
     yield server
     server.stop()
+
+@pytest.fixture(scope="session")
+def moto_s3_port(moto_s3_server):
+    """Obtiene el puerto dinámico asignado al servidor Moto."""
+    _, port = moto_s3_server.get_host_and_port()
+    return port
 
 @pytest.fixture(scope="function")
 def s3_mock(moto_s3_server, moto_s3_port):
