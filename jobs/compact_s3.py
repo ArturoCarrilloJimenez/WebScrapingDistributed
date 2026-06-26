@@ -2,14 +2,14 @@ import asyncio
 import datetime
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, AsyncIterator
 import uuid
 
 import aioboto3
+import anyio
 from botocore.config import Config
 import pyarrow as pa
 import pyarrow.parquet as pq
-from pyarrow.fs import S3FileSystem
 from shared.logging import Logger
 
 from config.settings import settings
@@ -202,6 +202,86 @@ def _get_compaction_schema() -> pa.Schema:
     ])
 
 
+class JobCompactor:
+    """
+    Clase de estado que encapsula la compactación incremental de registros 
+    para reducir la complejidad cognitiva de la función principal.
+    """
+    def __init__(self, client, job: ListOfJobs, schema: pa.Schema, job_id: str):
+        self.client = client
+        self.job = job
+        self.schema = schema
+        self.job_id = job_id
+        
+        self.part_counter = 0
+        self.rows_in_current_file = 0
+        self.rows_in_chunk = 0
+        self.current_chunk_buffer = {field.name: [] for field in schema}
+        self.local_file_path = os.path.join(TMP_DIR, f"compact_{job_id}_{self.part_counter}.parquet")
+        self.writer = None
+        self.first_date = None
+
+    def initialize_writer_if_needed(self, parse_result: ParseResult) -> None:
+        if self.writer is None:
+            self.writer = pq.ParquetWriter(self.local_file_path, schema=self.schema, compression='zstd')
+            first_date = parse_result.task.created_at
+            if first_date.tzinfo is None:
+                first_date = first_date.replace(tzinfo=datetime.timezone.utc)
+            self.first_date = first_date
+
+    def append_record(self, parse_result: ParseResult) -> None:
+        self.current_chunk_buffer["task_id"].append(parse_result.task.task_id)
+        self.current_chunk_buffer["url"].append(str(parse_result.task.url))
+        self.current_chunk_buffer["date"].append(parse_result.task.created_at)
+        self.current_chunk_buffer["data"].append(json.dumps(parse_result.data))
+        self.rows_in_chunk += 1
+        self.rows_in_current_file += 1
+
+    async def flush_current_chunk(self) -> None:
+        if self.rows_in_chunk > 0:
+            await asyncio.to_thread(_write_chunk_to_file, self.writer, self.schema, self.current_chunk_buffer)
+            self.current_chunk_buffer = {field.name: [] for field in self.schema}
+            self.rows_in_chunk = 0
+
+    async def check_and_perform_split(self, b_idx: int) -> None:
+        if not os.path.exists(self.local_file_path):
+            return
+        if os.path.getsize(self.local_file_path) < MAX_FILE_SIZE_BYTES:
+            return
+
+        batches_restantes = self.job.batches[b_idx + 1:]
+        bytes_remanentes_s3 = sum(b.size for b in batches_restantes)
+
+        if bytes_remanentes_s3 > TOLERANCIA_COLA_BYTES:
+            await self.close_and_upload_current_file()
+            self.part_counter += 1
+            self.rows_in_current_file = 0
+            self.local_file_path = os.path.join(TMP_DIR, f"compact_{self.job_id}_{self.part_counter}.parquet")
+
+    async def close_and_upload_current_file(self) -> None:
+        if self.writer is not None:
+            self.writer.close()
+            self.writer = None
+        if self.rows_in_current_file > 0:
+            await _upload_compacted_file(self.client, self.local_file_path, self.job_id, self.part_counter, self.first_date)
+            if os.path.exists(self.local_file_path):
+                os.remove(self.local_file_path)
+            self.part_counter += 1
+            self.rows_in_current_file = 0
+
+    def clean_local_file(self) -> None:
+        if self.writer is not None:
+            try:
+                self.writer.close()
+            except Exception:
+                pass
+        if os.path.exists(self.local_file_path):
+            try:
+                os.remove(self.local_file_path)
+            except Exception:
+                pass
+
+
 async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Semaphore) -> ListOfJobs | None:
     async with compaction_semaphore:
         if not _is_job_eligible(job):
@@ -211,19 +291,10 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
 
         job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
         schema = _get_compaction_schema()
-        
-        part_counter = 0
-        rows_in_current_file = 0
-        rows_in_chunk = 0
-        current_chunk_buffer = {field.name: [] for field in schema}
-        
-        local_file_path = os.path.join(TMP_DIR, f"compact_{job_id}_{part_counter}.parquet")
-        writer = None
-        first_date = None
+        compactor = JobCompactor(client, job, schema, job_id)
 
         try:
-            log.info(
-                f"Iniciando compactación incremental en disco de Job: {job.prefix}")
+            log.info(f"Iniciando compactación incremental en disco de Job: {job.prefix}")
 
             for b_idx, batch in enumerate(job.batches):
                 response = await client.get_object(Bucket=settings.s3_bucket_name, Key=batch.key)
@@ -236,92 +307,30 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
                         line_data = json.loads(line.decode('utf-8'))
                         parse_result = ParseResult.model_validate(line_data)
 
-                        # Inicializar el escritor de Parquet en el primer registro
-                        if writer is None:
-                            writer = pq.ParquetWriter(local_file_path, schema=schema, compression='zstd')
-                            first_date = parse_result.task.created_at
-                            if first_date.tzinfo is None:
-                                first_date = first_date.replace(tzinfo=datetime.timezone.utc)
+                        compactor.initialize_writer_if_needed(parse_result)
+                        compactor.append_record(parse_result)
 
-                        current_chunk_buffer["task_id"].append(parse_result.task.task_id)
-                        current_chunk_buffer["url"].append(str(parse_result.task.url))
-                        current_chunk_buffer["date"].append(parse_result.task.created_at)
-                        current_chunk_buffer["data"].append(json.dumps(parse_result.data))
-
-                        rows_in_chunk += 1
-                        rows_in_current_file += 1
-
-                        # Al alcanzar el tamaño del micro-búfer, escribimos al disco local
-                        if rows_in_chunk >= CHUNK_WRITE_SIZE:
-                            await asyncio.to_thread(_write_chunk_to_file, writer, schema, current_chunk_buffer)
-                            current_chunk_buffer = {field.name: [] for field in schema}
-                            rows_in_chunk = 0
-
-                            # Monitorear tamaño real del archivo en disco
-                            if os.path.exists(local_file_path) and os.path.getsize(local_file_path) >= MAX_FILE_SIZE_BYTES:
-                                # Calcular bytes remanentes en los lotes crudos de S3
-                                batches_restantes = job.batches[b_idx + 1:]
-                                bytes_remanentes_s3 = sum(b.size for b in batches_restantes)
-
-                                # Si lo que queda por procesar en S3 es menor al umbral elástico,
-                                # evitamos hacer el corte y permitimos que el archivo crezca ligeramente
-                                # para no dejar un micro-archivo de Parquet huérfano.
-                                if bytes_remanentes_s3 > TOLERANCIA_COLA_BYTES:
-                                    writer.close()
-                                    writer = None
-
-                                    await _upload_compacted_file(client, local_file_path, job_id, part_counter, first_date)
-                                    if os.path.exists(local_file_path):
-                                        os.remove(local_file_path)
-
-                                    part_counter += 1
-                                    rows_in_current_file = 0
-                                    local_file_path = os.path.join(TMP_DIR, f"compact_{job_id}_{part_counter}.parquet")
-
+                        if compactor.rows_in_chunk >= CHUNK_WRITE_SIZE:
+                            await compactor.flush_current_chunk()
+                            await compactor.check_and_perform_split(b_idx)
                 finally:
                     stream.close()
 
-            # Escribir registros remanentes del último chunk
-            if rows_in_chunk > 0 and writer is not None:
-                await asyncio.to_thread(_write_chunk_to_file, writer, schema, current_chunk_buffer)
-                current_chunk_buffer = {field.name: [] for field in schema}
-                rows_in_chunk = 0
+            # Guardar registros remanentes finales
+            await compactor.flush_current_chunk()
+            await compactor.close_and_upload_current_file()
 
-            # Cerrar y subir la parte final si contiene datos
-            if writer is not None:
-                writer.close()
-                writer = None
-
-            if rows_in_current_file > 0:
-                await _upload_compacted_file(client, local_file_path, job_id, part_counter, first_date)
-                if os.path.exists(local_file_path):
-                    os.remove(local_file_path)
-                part_counter += 1
-
-            if part_counter == 0:
-                log.info(
-                    f"Job {job_id} no contenía registros analíticos válidos.")
-                if os.path.exists(local_file_path):
-                    os.remove(local_file_path)
+            if compactor.part_counter == 0:
+                log.info(f"Job {job_id} no contenía registros analíticos válidos.")
+                compactor.clean_local_file()
                 return None
 
-            log.info(
-                f"Job {job_id} consolidado globalmente de forma exitosa en {part_counter} parte(s).")
+            log.info(f"Job {job_id} consolidado globalmente de forma exitosa en {compactor.part_counter} parte(s).")
             return job
 
         except Exception as e:
-            log.error(
-                f"Fallo crítico al compactar Job: {job.prefix} | Error: {e}")
-            if writer is not None:
-                try:
-                    writer.close()
-                except Exception:
-                    pass
-            if os.path.exists(local_file_path):
-                try:
-                    os.remove(local_file_path)
-                except Exception:
-                    pass
+            log.error(f"Fallo crítico al compactar Job: {job.prefix} | Error: {e}")
+            compactor.clean_local_file()
             raise
 
 
