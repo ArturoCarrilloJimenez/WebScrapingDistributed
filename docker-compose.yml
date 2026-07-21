@@ -30,6 +30,7 @@ services:
 
       - S3_ENDPOINT_URL=http://emulator-aws:4566
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_PREFIX_RAW_DATA=${S3_PREFIX_RAW_DATA}
       - S3_REGION=${S3_REGION}
 
       - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
@@ -64,6 +65,14 @@ services:
     volumes:
       - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
       - localstack_data:/app/data
+
+  mock-server:
+    image: python:3.13-slim
+    ports:
+      - "8080:8080"
+    volumes:
+      - "./infra/mock_server.py:/app/mock_server.py"
+    command: python /app/mock_server.py 8080
 
 volumes:
   localstack_data:

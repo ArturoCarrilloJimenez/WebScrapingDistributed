@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # s3
     s3_endpoint_url: str = "http://localhost:9000"  # URL del endpoint de S3 local
     s3_bucket_name: str = "my-bucket"  # Nombre del bucket S
+    s3_prefix_raw_data: str = "raw-data"  # Prefijo de las claves de S3 para los datos crudos
     s3_region: str = default_region_aws
 
 

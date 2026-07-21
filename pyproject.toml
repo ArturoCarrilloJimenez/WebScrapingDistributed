@@ -9,4 +9,9 @@ requires-python = ">=3.13"
 shared = { workspace = true }
 
 [tool.uv.workspace]
-members = ["shared", "producer", "worker"]
+members = [
+    "shared",
+    "producer",
+    "worker",
+    "jobs",
+]

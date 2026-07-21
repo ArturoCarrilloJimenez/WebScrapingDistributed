@@ -22,6 +22,7 @@ _adapter_sqs_instance = SQSAioBotoAdapter(
 _adapter_s3_instance = S3StorageRepository(
     endpoint_url=settings.s3_endpoint_url,
     bucket_name=settings.s3_bucket_name,
+    prefix_raw_data=settings.s3_prefix_raw_data,
     region=settings.s3_region
 )
 
