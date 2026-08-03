@@ -10,22 +10,22 @@ services:
       - PRODUCER_PORT=${PRODUCER_PORT}
       - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
       - SQS_ENDPOINT_URL=http://emulator-aws:4566
-      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
+      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks-static
+      - SQS_QUEUE_URL_DYNAMIC=http://emulator-aws:4566/000000000000/scraping-tasks-dynamic
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
     depends_on:
       - emulator-aws
 
-  worker:
+  worker-static:
     build:
       context: .
       dockerfile: worker/Dockerfile
     environment:
       - NUM_MAX_TASKS=10
-      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS}
-      
+      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS_STATIC}      
       - SQS_ENDPOINT_URL=http://emulator-aws:4566
-      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
+      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks-static
       - SQS_REGION=${SQS_REGION}
 
       - S3_ENDPOINT_URL=http://emulator-aws:4566
@@ -51,6 +51,39 @@ services:
       - emulator-aws
       - producer
 
+  worker-dynamic:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      - NUM_MAX_TASKS=10
+      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS_STATIC}      
+      - SQS_ENDPOINT_URL=http://emulator-aws:4566
+      - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks-dynamic
+      - SQS_REGION=${SQS_REGION}
+
+      - S3_ENDPOINT_URL=http://emulator-aws:4566
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_PREFIX_RAW_DATA=${S3_PREFIX_RAW_DATA}
+      - S3_REGION=${S3_REGION}
+
+      - DEFAULT_REGION_AWS=${DEFAULT_REGION_AWS}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+
+      - PROXY_ENABLED=${PROXY_ENABLED}
+      - PROXY_MODE=${PROXY_MODE}
+      - PROXY_STATIC_LIST=${PROXY_STATIC_LIST}
+      - PROXY_URL=${PROXY_URL}
+      - PROXY_STATIC_CHECK_INTERVAL=${PROXY_STATIC_CHECK_INTERVAL}
+      - PROXY_STATIC_IDLE_THRESHOLD=${PROXY_STATIC_IDLE_THRESHOLD}
+      - PROXY_MAX_POOL_SIZE=${PROXY_MAX_POOL_SIZE}
+      - PROXY_IDLE_TIMEOUT=${PROXY_IDLE_TIMEOUT}
+      - PROXY_MAX_REQUESTS_PER_SESSION=${PROXY_MAX_REQUESTS_PER_SESSION}
+      - PROXY_MIN_REQUESTS_PER_SESSION=${PROXY_MIN_REQUESTS_PER_SESSION}
+    depends_on:
+      - emulator-aws
+      - producer
   emulator-aws:
     image: floci/floci:latest-compat
     ports:

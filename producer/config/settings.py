@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     default_region_aws: str = "us-east-1"
     sqs_endpoint_url: str = "http://localhost:9324"  # URL del endpoint de SQS local
     sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue"  # URL de la cola SQS local
+    sqs_queue_url_dynamic: str = "http://localhost:9324/000000000000/my-queue-dynamic"  # URL de la cola SQS local
     aws_access_key_id: str = "test"  # Clave de acceso de AWS (puede ser cualquier valor para pruebas locales)
     aws_secret_access_key: str = "test"  # Clave secreta de acceso de AWS (puede ser cualquier valor para pruebas locales)
 

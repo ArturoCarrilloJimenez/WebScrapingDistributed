@@ -13,8 +13,10 @@ log = Logger("Scraping Tasks Orchestrator")
 
 
 class ScrapingOrchestrator:
-    def __init__(self, adapter: TaskProducer):
-        self.adapter = adapter
+    def __init__(self, adapter_static: TaskProducer, adapter_dynamic: TaskProducer):
+        self.adapter_static = adapter_static
+        self.adapter_dynamic = adapter_dynamic
+        
         # Solo 20 lotes (200 URLs) volando simultáneamente para no saturar la red
         self._semaphore = asyncio.Semaphore(20)
 
@@ -43,33 +45,51 @@ class ScrapingOrchestrator:
     async def _process_in_parallel(
         self, tasks: List[TaskModel], request: BulkTaskRequest
     ) -> BatchResponse:
+        from shared.models import ParserType
+
         log.info("Iniciamos el procesaminto de tareas", request.job_id)
+
+        static_tasks = [t for t in tasks if t.parser_type != ParserType.DINAMIC_PLAYWRIGHT]
+        dynamic_tasks = [t for t in tasks if t.parser_type == ParserType.DINAMIC_PLAYWRIGHT]
 
         queue = asyncio.Queue(maxsize=100)
 
         # Mapea las tareas
         async def mapper():
-            chunks = [tasks[i : i + 10] for i in range(0, len(tasks), 10)]
-            for chunk in chunks:
+            static_chunks = [static_tasks[i : i + 10] for i in range(0, len(static_tasks), 10)]
+            for chunk in static_chunks:
                 batch_id = str(uuid4())
                 mapped_tasks = [self._map_to_task(batch_id, task, request) for task in chunk]
-                await queue.put(mapped_tasks)  # Mete el lote mapeado en la cola
-                log.info(f"Mapeamos el lote con id {batch_id}")
+                await queue.put((mapped_tasks, "static"))
+                log.info(f"Mapeamos el lote estático con id {batch_id}")
+
+            dynamic_chunks = [dynamic_tasks[i : i + 10] for i in range(0, len(dynamic_tasks), 10)]
+            for chunk in dynamic_chunks:
+                batch_id = str(uuid4())
+                mapped_tasks = [self._map_to_task(batch_id, task, request) for task in chunk]
+                await queue.put((mapped_tasks, "dynamic"))
+                log.info(f"Mapeamos el lote dinámico con id {batch_id}")
+
             await queue.put(None)  # Señal de fin
 
         # Envia las tareas
         async def sender():
             results = []
             while True:
-                batch = await queue.get()
-                if batch is None:
+                item = await queue.get()
+                if item is None:
                     break
+
+                batch, task_type = item
 
                 # Aquí usamos el semáforo para controlar la concurrencia de RED
                 async with self._semaphore:
-                    res = await self.adapter.send_batch(batch)
+                    if task_type == "dynamic":
+                        res = await self.adapter_dynamic.send_batch(batch)
+                    else:
+                        res = await self.adapter_static.send_batch(batch)
                     results.append(res)
-                    log.info(f"Enviamos el lote {batch[0].batch_id}")
+                    log.info(f"Enviamos el lote {task_type} {batch[0].batch_id}")
                 queue.task_done()
             return results
 

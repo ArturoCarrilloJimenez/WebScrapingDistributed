@@ -35,18 +35,28 @@ def aws_credentials():
 
 @pytest.fixture(scope="function")
 def sqs_mock():
-    """Start moto mock for SQS and create a test queue."""
+    """Start moto mock for SQS and create static and dynamic test queues."""
     with mock_aws():
         client = boto3.client("sqs", region_name="us-east-1")
-        queue = client.create_queue(QueueName="test-queue")
-        # Update queue URL
-        settings.sqs_queue_url = queue["QueueUrl"]
+        queue_static = client.create_queue(QueueName="test-queue")
+        queue_dynamic = client.create_queue(QueueName="test-queue-dynamic")
+        
+        # Update queue URLs
+        settings.sqs_queue_url = queue_static["QueueUrl"]
+        settings.sqs_queue_url_dynamic = queue_dynamic["QueueUrl"]
 
-        # Override FastAPI dependency to not use LocalStack endpoint
-        adapter = SQSAioBotoAdapter(
-            endpoint_url=None, queue_url=queue["QueueUrl"], region="us-east-1"
+        # Override FastAPI dependencies
+        from dependencies.dependencies import get_task_producer, get_task_producer_dynamic
+        
+        adapter_static = SQSAioBotoAdapter(
+            endpoint_url=None, queue_url=queue_static["QueueUrl"], region="us-east-1"
         )
-        app.dependency_overrides[get_task_producer] = lambda: adapter
+        adapter_dynamic = SQSAioBotoAdapter(
+            endpoint_url=None, queue_url=queue_dynamic["QueueUrl"], region="us-east-1"
+        )
+        
+        app.dependency_overrides[get_task_producer] = lambda: adapter_static
+        app.dependency_overrides[get_task_producer_dynamic] = lambda: adapter_dynamic
 
         yield client
 
