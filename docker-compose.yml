@@ -66,13 +66,6 @@ services:
       - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
       - localstack_data:/app/data
 
-  mock-server:
-    image: python:3.13-slim
-    ports:
-      - "8080:8080"
-    volumes:
-      - "./infra/mock_server.py:/app/mock_server.py"
-    command: python /app/mock_server.py 8080
 
 volumes:
   localstack_data:

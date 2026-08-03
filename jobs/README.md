@@ -81,7 +81,7 @@ El módulo comparte un objeto centralizado de configuración mediante `jobs/conf
 | :--- | :--- | :--- | :--- |
 | `S3_ENDPOINT_URL` | String | `http://localhost:4566` | Endpoint del almacenamiento de objetos S3. |
 | `S3_BUCKET_NAME` | String | `scraping-raw-data` | Nombre del bucket del Data Lake. |
-| `S3_PREFIX_RAW_ZONE` | String | `row-data` | Carpeta virtual de la Landing Zone de entrada. |
+| `S3_PREFIX_RAW_DATA` | String | `raw-data` | Carpeta virtual de la Landing Zone de entrada. |
 | `S3_PREFIX_COMPACTED_DATA` | String | `compacted-data` | Carpeta virtual de destino para datos compactados Parquet. |
 | `AWS_ACCESS_KEY_ID` | String | `test` | Clave de acceso de AWS. |
 | `AWS_SECRET_ACCESS_KEY` | String | `test` | Clave secreta de acceso de AWS. |
