@@ -18,7 +18,9 @@ graph TD
     subgraph Orquestación Asíncrona
         BG -->|Deduplica URLs| Map[Mapper - Trocea en lotes de 10]
         Map -->|asyncio.Queue| Send[Sender - Concurrencia de red]
-        Send -->|Semaphore 20| SQS[(AWS SQS)]
+        Send -->|Router por ParserType| Router{¿static_css?}
+        Router -->|Sí| SQSStatic[(SQS: scraping-tasks-static)]
+        Router -->|No| SQSDynamic[(SQS: scraping-tasks-dynamic)]
     end
 ```
 
@@ -70,7 +72,8 @@ El microservicio lee sus opciones desde el archivo `.env` en la raíz del proyec
 | `NUM_MAX_TASKS`      | `int`  | `10`                    | Tamaño máximo de lotes enviados a SQS (máx 10)         |
 | `DEFAULT_REGION_AWS` | `str`  | `us-east-1`             | Región de AWS para las colas                           |
 | `SQS_ENDPOINT_URL`   | `str`  | `http://localhost:9324` | URL local del emulador de AWS SQS (Floci)              |
-| `SQS_QUEUE_URL`      | `str`  | `...`                   | URL física de la cola principal                        |
+| `SQS_QUEUE_URL`      | `str`  | `...`                   | URL física de la cola principal estática               |
+| `SQS_QUEUE_URL_DYNAMIC`| `str` | `...`                   | URL física de la cola principal dinámica               |
 
 ---
 

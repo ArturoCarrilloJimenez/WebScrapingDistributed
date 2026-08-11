@@ -10,7 +10,7 @@ El Worker está diseñado bajo un enfoque **no bloqueante y concurrente** utiliz
 
 ```mermaid
 graph TD
-    SQS[(SQS - scraping-tasks)] -->|1. Fetch Batch min slots| Engine[Worker Engine / Controller]
+    SQS[(SQS: static o dynamic)] -->|1. Fetch Batch min slots| Engine[Worker Engine / Controller]
     Engine -->|2. Control de Concurrencia - Semáforo| Semaphore{Slots disponibles}
     
     subgraph Procesamiento Concurrente de Tareas
@@ -20,14 +20,15 @@ graph TD
     end
 
     Task1 -->|Proxy & network_client| Web[Servidores Web Objetivo]
-    Web -->|HTML / JSON| ParserFactory[ParserFactory]
+    Web -->|HTML / Render JS| ParserFactory[ParserFactory]
     
     subgraph Motores de Parseo Modulares
         ParserFactory -->|parser_type: static_css| StaticCSS[StaticCSSParser]
-        ParserFactory -.->|Futuro: playwright_amazon| Playwright[PlaywrightParser]
+        ParserFactory -->|parser_type: dynamic_playwright| Playwright[DynamicPlaywrightParser]
     end
 
     StaticCSS -->|ParseResult| BufferService[Buffer de Trabajos - JobBufferService]
+    Playwright -->|ParseResult| BufferService
     
     subgraph DL [Data Lake y Persistencia]
         BufferService -->|3. Volcado masivo .jsonl| S3[(Amazon S3 - Data Lake)]
@@ -112,11 +113,11 @@ El archivo `.env` en la raíz controla el comportamiento del Worker:
 
 | Variable | Tipo | Por Defecto | Descripción |
 | :--- | :--- | :--- | :--- |
-| `WORKER_NUM_MAX_CONCURRENT_TASKS` | `int` | `10` | Concurrencia máxima (Semáforo) |
+| `WORKER_NUM_MAX_CONCURRENT_TASKS` | `int` | `10` | Concurrencia máxima (Semáforo) para el proceso actual. Mapeada en Docker mediante `WORKER_NUM_MAX_CONCURRENT_TASKS_STATIC` o `WORKER_NUM_MAX_CONCURRENT_TASKS_DYNAMIC`. |
 | `NUM_MAX_TASKS` | `int` | `10` | Lote máximo de borrado y fetch (límite SQS 10) |
 | `DEFAULT_REGION_AWS` | `str` | `us-east-1` | Región AWS por defecto del sistema |
 | `SQS_ENDPOINT_URL` | `str` | `http://emulator-aws:4566` | Endpoint del emulador de AWS SQS |
-| `SQS_QUEUE_URL` | `str` | `...` | URL física de la cola SQS |
+| `SQS_QUEUE_URL` | `str` | `...` | URL física de la cola SQS que consume este worker (estática o dinámica) |
 | `SQS_REGION` | `str` | `us-east-1` | Región de AWS específica para la cola SQS |
 | `S3_ENDPOINT_URL` | `str` | `http://localhost:9000` | Endpoint del emulador de S3 |
 | `S3_BUCKET_NAME` | `str` | `my-bucket` | Nombre del bucket destino (Data Sink) |
@@ -133,13 +134,13 @@ El archivo `.env` en la raíz controla el comportamiento del Worker:
 El Worker está en el centro del desarrollo del sistema y su diseño modular (Clean Architecture) facilita las siguientes ampliaciones planificadas:
 
 ### 1. Nuevos Motores de Parseo Web y Bifurcación de Colas
-Actualmente, el sistema sobresale en extracción estática ultrarrápida con `StaticCSSParser` (basado en `aiohttp` y selectores CSS). El enfoque de evolución comprende:
-- **Motor de Renderizado Dinámico (`PlaywrightParser` / `Selenium`)**: Integración de navegadores headless de forma dinámica para webs basadas en Single Page Applications (SPA) y frameworks interactivos (React, Vue, Angular).
-- **Bifurcación de Canales (Estático vs Dinámico)**: Al implementarse la extracción dinámica, la arquitectura separará los flujos físicos de trabajo en colas SQS independientes. Esto permitirá que las tareas estáticas se procesen bajo un perfil de **alta concurrencia**, mientras que las dinámicas operarán a **menor concurrencia** para proteger el consumo de hardware (CPU/RAM). El Producer se actualizará de forma transparente para clasificar y enrutar inteligentemente las tareas al canal adecuado.
-- **Motor de Parseo con IA / LLMs**: Integración de modelos de procesamiento de lenguaje natural para extraer datos estructurados de forma adaptativa.
+- **[x] Motor de Renderizado Dinámico (`DynamicPlaywrightParser`)**: Integración completa de navegadores headless Chromium con evasión anti-bot integrada (`playwright-stealth`) y control de códigos `403`/`429` para rotación inteligente de IPs.
+- **[x] Bifurcación de Canales (Estático vs Dinámico)**: Los flujos de trabajo se han separado físicamente en colas SQS independientes (`scraping-tasks-static` y `scraping-tasks-dynamic`) consumidas por workers dedicados. Esto permite procesar tareas estáticas bajo **alta concurrencia (60 tareas)**, y dinámicas bajo **baja concurrencia (3 tareas)** para evitar sobrecargas del host.
+- **[ ] Motor de Parseo con IA / LLMs**: Integración de modelos de procesamiento de lenguaje natural para extraer datos estructurados de forma adaptativa.
 
 ### 2. Almacenamiento Asíncrono en Amazon S3
-- **Persistencia en S3 (Data Lake)**: Implementación de unData Lake asíncrono mediante `S3StorageRepository` and `JobBufferService`. Los resultados de scraping se acumulan en memoria RAM en un buffer ordenado por Job, y al alcanzar los límites (3MB o 60s) se vuelcan en formato JSON Lines (.jsonl) hacia S3. Esto permite a herramientas de análisis (Athena, Spark) consultar los datos directamente de forma desacoplada sin sobrecargar la base de datos operativa.
+- **[x] Persistencia en S3 (Data Lake)**: Implementación de un Data Lake asíncrono mediante `S3StorageRepository` y `JobBufferService`. Los resultados de scraping se acumulan en memoria RAM en un buffer ordenado por Job y se vuelcan en formato JSON Lines (.jsonl) hacia S3 (particiones Hive) al superar 3MB o 60 segundos.
+- **[ ] Compactor & Retención de Datos**: Optimización de compresión en archivos Parquet (ZSTD) y traspaso automático de JSONL a Glacier para consulta analítica desacoplada.
 
 ### 3. De-duplicación, Idempotencia y Observabilidad en Tiempo Real (Redis)
 - **Control de Duplicados**: Para evitar scraping doble y garantizar la idempotencia de las peticiones, se integrará un motor de memoria compartida ultrarrápido como **Redis** (o bases de datos similares).

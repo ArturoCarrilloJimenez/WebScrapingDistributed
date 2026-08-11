@@ -36,21 +36,31 @@ Esto permite que ambos lados escalen de forma independiente y que ninguna tarea 
 graph TD
     Client[Cliente / API Request] -->|POST /scraping/batch| Producer[Producer API - FastAPI]
     Producer -->|202 Accepted| Client
-    Producer -->|Batch Send 10 msg max| SQS[(SQS - scraping-tasks)]
     
-    subgraph Cluster de Workers [Escalado Horizontal]
-        Worker1[Worker 1]
-        Worker2[Worker 2]
-        WorkerN[Worker N]
+    Producer -->|Router: static| SQSStatic[(SQS - scraping-tasks-static)]
+    Producer -->|Router: dynamic| SQSDynamic[(SQS - scraping-tasks-dynamic)]
+    
+    subgraph Cluster de Workers Estáticos
+        WorkerS1[Worker Static 1]
+        WorkerS2[Worker Static 2]
     end
 
-    SQS -->|Fetch batch| Worker1
-    SQS -->|Fetch batch| Worker2
-    SQS -->|Fetch batch| WorkerN
+    subgraph Cluster de Workers Dinámicos
+        WorkerD1[Worker Dynamic 1]
+        WorkerD2[Worker Dynamic 2]
+    end
 
-    Worker1 -.->|Fallo crítico > Max Retries| DLQ[(DLQ - scraping-tasks-dlq)]
-    Worker2 -.->|Reintento temporal| SQS
-    WorkerN -->|ACK - Delete Batch| SQS
+    SQSStatic -->|Fetch batch| WorkerS1
+    SQSStatic -->|Fetch batch| WorkerS2
+    
+    SQSDynamic -->|Fetch batch| WorkerD1
+    SQSDynamic -->|Fetch batch| WorkerD2
+
+    WorkerS1 -.->|Fallo crítico > Max Retries| DLQStatic[(DLQ - scraping-tasks-dlq-static)]
+    WorkerD1 -.->|Fallo crítico > Max Retries| DLQDynamic[(DLQ - scraping-tasks-dlq-dynamic)]
+    
+    WorkerS2 -->|ACK - Delete Batch| SQSStatic
+    WorkerD2 -->|ACK - Delete Batch| SQSDynamic
 ```
 
 ### 1. Producer — El Orquestador
@@ -70,9 +80,10 @@ El **Producer** es una API de alto rendimiento desarrollada con **FastAPI**. No 
 ### 2. SQS & DLQ — El Buffer y la Red de Seguridad
 
 **Amazon SQS** actúa como el búfer persistente y de desacoplamiento entre el volumen de producción y la capacidad del consumidor.
+- **Doble cola física por tipo de tarea**: Se utilizan colas independientes para tareas estáticas (`scraping-tasks-static`) y dinámicas (`scraping-tasks-dynamic`). Esto evita que el procesamiento pesado de navegadores dinámicos bloquee las tareas estáticas ultrarrápidas.
 - **Desacoplamiento total**: El Producer puede encolar 100.000 tareas en segundos; el clúster de Workers las irá procesando a su propio ritmo de manera fluida.
 - **Garantía de entrega (At-least-once)**: Si un Worker falla a mitad del procesamiento de una tarea, el mensaje vuelve a estar visible en la cola después de que expire su tiempo de visibilidad para ser procesado por otro Worker saludable.
-- **DLQ (Dead Letter Queue)**: Cuando una tarea supera el número máximo de reintentos (`max_retries`, por defecto 10), SQS la desvía automáticamente a la cola de descarte (`scraping-tasks-dlq`). Esto evita que un error persistente (como una URL inexistente o formato corrupto) sature los hilos de ejecución indefinidamente.
+- **DLQs Dedicadas (Dead Letter Queue)**: Cuando una tarea supera el número máximo de reintentos (`max_retries`, por defecto 10), SQS la desvía automáticamente a su correspondiente cola de descarte (`scraping-tasks-dlq-static` o `scraping-tasks-dlq-dynamic`). Esto evita que un error persistente (como una URL inexistente o formato corrupto) sature los hilos de ejecución indefinidamente.
 - **Fetch Concurrente Seguro**: El adaptador SQS realiza peticiones paralelas de descarga y espera a que todas finalicen (`asyncio.gather`), evitando cancelaciones abruptas de peticiones en vuelo que causarían "fugas de visibilidad" en SQS.
 
 ---
@@ -89,8 +100,9 @@ El **Worker** es un microservicio autónomo y altamente concurrente encargado de
   3. Realiza un vaciado síncrono del buffer de memoria (**drenado de RAM**) hacia S3 para todos los trabajos activos, previniendo la pérdida de datos volátiles.
   4. Encola los ACKs de los mensajes correspondientes y espera a que el flusher asíncrono termine de vaciar la cola de borrados en SQS.
   5. Cierra las conexiones y sockets del cliente de almacenamiento (S3) y del broker (SQS) de forma limpia.
-- **Factoría de Parsers Dinámica (`ParserFactory`)**: Mapea dinámicamente el campo `parser_type` de la tarea al motor de extracción adecuado. Actualmente integra:
+- **Factoría de Parsers Dinámica (`ParserFactory`)**: Mapea dinámicamente el campo `parser_type` de la tarea al motor de extracción adecuado:
   - `STATIC_CSS`: Extractor altamente eficiente basado en `aiohttp` y selectores CSS/XPath configurados bajo demanda.
+  - `DINAMIC_PLAYWRIGHT`: Extractor para contenido dinámico cargado por Javascript, usando navegadores Chromium headless controlados por Playwright con evasión anti-bot integrada (`playwright-stealth`).
 - **Buffer asíncrono de ACKs (`_ack_flusher`)**: Para evitar el coste de borrar mensajes uno a uno en SQS, el Worker los acumula en una cola en memoria y una tarea secundaria los elimina en lotes periódicos de hasta 10 mensajes, reduciendo el tráfico de red de bajada.
 
 #### Resiliencia y Algoritmo de Backoff Dinámico:
@@ -152,7 +164,7 @@ Para garantizar la integridad total de los datos y evitar pérdidas ante apagado
 | **Producer** | Ingesta, Validación (Pydantic), Encolado (Batching) | HTTP REST (FastAPI) | **Completado** |
 | **Transporte** | Búfer temporal y persistencia de tareas | AWS SQS | **Completado** |
 | **Dead Letter** | Captura y cuarentena de tareas defectuosas | AWS SQS DLQ | **Completado** |
-| **Worker** | Consumo asíncrono, Concurrencia, Parsers, Reintentos | asyncio + aiohttp | **Completado** |
+| **Worker** | Consumo asíncrono, Concurrencia, Parsers, Reintentos | asyncio + aiohttp + Playwright | **Completado** |
 | **Proxies** | Evasión de bloqueos, Sticky Sessions | Static Pool & Backconnect | **Completado** |
 | **Almacenamiento** | Data Lake (JSON Lines particionado por Job) | aioboto3 (S3 API) | **Completado** |
 
@@ -182,7 +194,7 @@ WebScrapingDistributed/
 │   │   ├── storage/                # Persistencia de datos raspados (Base, S3Adapter)
 │   │   └── task/                   # Adaptador de consumo asíncrono de SQS
 │   ├── scraping/                   # Motores de análisis y extracción
-│   │   ├── parsers/                # Motores de parseo (StaticCSSParser) y factorías
+│   │   ├── parsers/                # Motores de parseo (StaticCSSParser, DynamicPlaywrightParser) y factorías
 │   │   ├── services/               # Servicios de scraping (JobBufferService)
 │   │   ├── controller.py           # Orquestador de consumo, concurrencia y tolerancia a fallos
 │   │   └── exceptions.py           # Clasificación de excepciones (Fatal, Blocked, Timeout)
@@ -239,7 +251,8 @@ AWS_SECRET_ACCESS_KEY=test
 
 # SQS
 SQS_ENDPOINT_URL=http://emulator-aws:4566
-SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks
+SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks-static
+SQS_QUEUE_URL_DYNAMIC=http://emulator-aws:4566/000000000000/scraping-tasks-dynamic
 SQS_REGION=us-east-1
 
 # S3
@@ -252,7 +265,8 @@ NUM_MAX_TASKS=10
 PRODUCER_PORT=8000
 PRODUCER_HOST=0.0.0.0
 DEBUG_MODE=True
-WORKER_NUM_MAX_CONCURRENT_TASKS=5
+WORKER_NUM_MAX_CONCURRENT_TASKS_STATIC=60
+WORKER_NUM_MAX_CONCURRENT_TASKS_DYNAMIC=3
 
 # Configuración de Proxies del Worker (Opcional)
 PROXY_ENABLED=False
@@ -270,11 +284,11 @@ docker-compose up -d --build
 ```
 
 Este comando levanta de forma inmediata:
-1. **`emulator-aws` (Floci)** en el puerto `4566`. Ejecuta automáticamente `infra/init-aws.sh` inicializando la cola principal `scraping-tasks` y su Dead Letter Queue `scraping-tasks-dlq`.
+1. **`emulator-aws` (Floci)** en el puerto `4566`. Ejecuta automáticamente `infra/init-aws.sh` inicializando las colas principales (`scraping-tasks-static` y `scraping-tasks-dynamic`) junto con sus respectivas Dead Letter Queues.
 2. **`producer`** en el puerto `8000`. Expone la API para inyectar tareas.
-3. **`worker`**. Consumidor de tareas en segundo plano. Puedes escalar los workers libremente si quieres comprobar el reparto de carga:
+3. **`worker-static`** y **`worker-dynamic`**. Consumidores especializados de tareas en segundo plano. Puedes escalar los pools de workers independientemente si quieres comprobar el reparto de carga:
    ```bash
-   docker-compose up -d --scale worker=3
+   docker-compose up -d --scale worker-static=3 --scale worker-dynamic=2
    ```
 
 ### 3. Arranque en Desarrollo Local (Sin Docker para los servicios)
@@ -294,10 +308,17 @@ uv run uvicorn main:app --reload --port 8000
 ```
 
 #### Paso 3: Ejecutar el Worker (en otra terminal)
+Para consumir tareas de la cola estática:
 ```bash
 cd worker
 uv sync
-uv run python main.py
+SQS_QUEUE_URL=http://localhost:4566/000000000000/scraping-tasks-static uv run python main.py
+```
+Para consumir tareas de la cola dinámica (Playwright):
+```bash
+cd worker
+uv sync
+SQS_QUEUE_URL=http://localhost:4566/000000000000/scraping-tasks-dynamic uv run python main.py
 ```
 
 ---
@@ -332,7 +353,7 @@ uv run pytest
 - [x] **Control de Resiliencia Inteligente**: Diferenciación de excepciones y reintentos con backoff dinámico en SQS.
 - [x] **Módulo de Rotación de Proxies**: Soporte para Static Pool y Backconnect con Sticky Sessions.
 - [x] **Suite de Tests de Integración**: Cobertura de tests asíncronos y simulaciones de fallos en red.
-- [ ] **Parsers Dinámicos**: Implementación de extracción mediante Playwright/Selenium para webs dinámicas con renderizado JS.
+- [x] **Parsers Dinámicos**: Implementación de extracción mediante Playwright/Selenium para webs dinámicas con renderizado JS (usando `playwright-stealth`).
 - [x] **Almacenamiento en S3**: Integración asíncrona para guardar el contenido extraído en formato JSON Lines segregado por Job con control de reintentos.
 - [ ] **Base de Datos de Estado**: Guardado de estados intermedios y de-duplicación agresiva de URLs para evitar procesados dobles.
 - [ ] **Despliegue Continuo (CD)** automatizado para subidas directas a la nube.
