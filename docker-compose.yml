@@ -57,7 +57,7 @@ services:
       dockerfile: worker/Dockerfile
     environment:
       - NUM_MAX_TASKS=10
-      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS_STATIC}      
+      - WORKER_NUM_MAX_CONCURRENT_TASKS=${WORKER_NUM_MAX_CONCURRENT_TASKS_DYNAMIC}      
       - SQS_ENDPOINT_URL=http://emulator-aws:4566
       - SQS_QUEUE_URL=http://emulator-aws:4566/000000000000/scraping-tasks-dynamic
       - SQS_REGION=${SQS_REGION}
