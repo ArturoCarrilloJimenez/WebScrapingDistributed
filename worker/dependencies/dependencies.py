@@ -69,19 +69,30 @@ def get_secure_network_client() -> SecureNetworkClient:
 
 
 from scraping.security.honeypot_guard import HoneypotGuard
+from scraping.parsers.extractor import UniversalDOMExtractor
 
 _honeypot_guard_instance = HoneypotGuard()
+_dom_extractor_instance = UniversalDOMExtractor(honeypot_guard=_honeypot_guard_instance)
 
 
 def get_honeypot_guard() -> HoneypotGuard:
     return _honeypot_guard_instance
 
 
+def get_dom_extractor() -> UniversalDOMExtractor:
+    return _dom_extractor_instance
+
+
 def get_parser_factory() -> ParserFactory:
-    # La factoría se alimenta del cliente centralizado de red y de la capa de seguridad
+    # La factoría se alimenta del cliente centralizado de red y del extractor universal (que integra HoneypotGuard)
     network_client = get_secure_network_client()
-    honeypot_guard = get_honeypot_guard()
-    return ParserFactory(network_client=network_client, honeypot_guard=honeypot_guard)
+    extractor = get_dom_extractor()
+    return ParserFactory(
+        network_client=network_client,
+        extractor=extractor
+    )
+
+
 
 
 

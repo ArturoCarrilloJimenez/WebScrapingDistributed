@@ -102,10 +102,12 @@ El **Worker** es un microservicio autónomo y altamente concurrente encargado de
   3. Realiza un vaciado síncrono del buffer de memoria (**drenado de RAM**) hacia S3 para todos los trabajos activos, previniendo la pérdida de datos volátiles.
   4. Encola los ACKs de los mensajes correspondientes y espera a que el flusher asíncrono termine de vaciar la cola de borrados en SQS.
   5. Cierra las conexiones y sockets del cliente de almacenamiento (S3) y del broker (SQS) de forma limpia.
-- **Factoría de Parsers Dinámica (`ParserFactory`)**: Mapea dinámicamente el campo `parser_type` de la tarea al motor de extracción adecuado:
-  - `STATIC_CSS`: Extractor altamente eficiente basado en `aiohttp` y selectores CSS/XPath configurados bajo demanda.
-  - `DINAMIC_PLAYWRIGHT`: Extractor para contenido dinámico cargado por Javascript, usando navegadores Chromium headless controlados por Playwright con evasión anti-bot integrada (`playwright-stealth`).
+- **Factoría y Extractor Universal de Parsers (`ParserFactory` & `UniversalDOMExtractor`)**: Mapea dinámicamente el campo `parser_type` de la tarea al motor de ejecución adecuado e integra el extractor estructurado universal:
+  - `STATIC_CSS`: Extractor estático basado en `httpx` / BeautifulSoup, libre de bloqueos TLS 403.
+  - `DINAMIC_PLAYWRIGHT`: Extractor para contenido dinámico con renderizado Javascript en Chromium headless y evasión antibot (`playwright-stealth`).
+  - **Esquema de Extracción Universal**: Soporta tanto **Entidades Únicas** como **Colecciones de Ítems** mediante `container` y selección de atributos HTML (`href`, `src`, `data-*`) vía `FieldSpec`.
 - **Buffer asíncrono de ACKs (`_ack_flusher`)**: Para evitar el coste de borrar mensajes uno a uno en SQS, el Worker los acumula en una cola en memoria y una tarea secundaria los elimina en lotes periódicos de hasta 10 mensajes, reduciendo el tráfico de red de bajada.
+
 
 #### Resiliencia y Algoritmo de Backoff Dinámico:
 El Worker clasifica las excepciones para responder de manera inteligente ante los fallos:

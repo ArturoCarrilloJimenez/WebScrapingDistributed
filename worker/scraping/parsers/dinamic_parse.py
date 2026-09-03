@@ -11,7 +11,9 @@ from scraping.exceptions import ErrorCategory, ScrapingError
 from shared.models.parse_config.dynamic_playwright import Config as PlaywrightConfig
 
 from typing import Optional
-from scraping.security.honeypot_guard import HoneypotGuard
+from bs4 import BeautifulSoup
+from .extractor import UniversalDOMExtractor
+
 
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
@@ -20,10 +22,16 @@ class DynamicParser(BaseParser):
     _browser = None
     _lock = asyncio.Lock()
 
-    def __init__(self, network_client: SecureNetworkClient, honeypot_guard: Optional[HoneypotGuard] = None):
+    def __init__(
+        self,
+        network_client: SecureNetworkClient,
+        extractor: Optional[UniversalDOMExtractor] = None
+    ):
         super().__init__()
         self.network_client = network_client
-        self.honeypot_guard = honeypot_guard
+        self.extractor = extractor or UniversalDOMExtractor()
+
+
 
 
     @classmethod
@@ -142,33 +150,40 @@ class DynamicParser(BaseParser):
                 self.log.info(f"Espera: Retardo fijo de {config.fixed_sleep_s}s | Tarea ID: {task.task_id}")
                 await asyncio.sleep(config.fixed_sleep_s)
                 
-            # 10. Extracción de datos
-            extracted = {}
-            is_empty = []
-            
-            for field, selector in config.selectors.items():
-                # 🛡️ FILTRADO ACTIVO EN LOTE DE HONEYPOTS EN CHROMIUM (Si la dependencia está inyectada)
-                if self.honeypot_guard:
-                    locators = await self.honeypot_guard.filter_playwright_locators_in_batch(page, selector)
-                else:
-                    locators = await page.locator(selector).all()
+            # 10. Extracción de datos usando HTML renderizado
+            if config.container and not config.wait_for_selector:
+                try:
+                    await page.wait_for_selector(config.container, timeout=config.timeout_ms)
+                except Exception:
+                    pass
 
-                values = [await loc.inner_text() for loc in locators]
-                extracted[field] = [val.strip() for val in values if val.strip()]
-                
-                if len(locators) > 0 and len(extracted[field]) > 0:
-                    is_empty.append(False)
-                else:
-                    is_empty.append(True)
+            html_content = await page.content()
+            soup = BeautifulSoup(html_content, "html.parser")
 
-                    
-            # Si todos los selectores resultan en listas vacías, lanzamos error contractual
-            if not config.selectors or all(is_empty):
+            extracted = self.extractor.extract_from_soup(
+                soup=soup,
+                selectors=config.selectors,
+                container=config.container
+            )
+
+
+
+            # Validación de datos extraídos vacíos
+            if not extracted:
                 raise ScrapingError(
                     ErrorCategory.INVALID_SCHEMA,
                     "Selectores no extrajeron datos (posible cambio de DOM o carga fallida)",
                     task.task_id
                 )
+            elif isinstance(extracted, dict):
+                is_empty = [not v for v in extracted.values()]
+                if all(is_empty):
+                    raise ScrapingError(
+                        ErrorCategory.INVALID_SCHEMA,
+                        "Selectores no extrajeron datos (posible cambio de DOM o carga fallida)",
+                        task.task_id
+                    )
+
                 
         except ScrapingError:
             raise

@@ -1,19 +1,26 @@
 from typing import Dict, List, Optional
 from pydantic import Field, PositiveInt
-from .base import BaseParserConfig
+from .base import BaseParserConfig, FieldDefinition
 
 class Config(BaseParserConfig):
     """
-    Configuración para el motor 'dynamic_playwright'.
+    Configuración universal para el motor 'dynamic_playwright'.
     Espera un diccionario donde la clave es el nombre del campo
-    y el valor es el selector CSS.
+    y el valor es el selector CSS o especificación de campo.
     """
     
+    # Contenedor padre
+    container: Optional[str] = Field(
+        default=None,
+        description="Selector CSS/XPath del contenedor padre para colecciones repetitivas (ej: '.product-card')"
+    )
+
+
     # Selectores CSS/XPath
-    selectors: Dict[str, str] = Field(
+    selectors: Dict[str, FieldDefinition] = Field(
         ...,
         min_length=1,
-        description="Mapeo de campo a selector CSS/XPath. Ej: {'precio': '.price-tag'}"
+        description="Mapeo de campo a selector CSS/XPath o FieldSpec. Ej: {'precio': '.price-tag'}"
     )
     
     # Parámetros de Espera y Carga

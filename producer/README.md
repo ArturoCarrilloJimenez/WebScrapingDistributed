@@ -109,30 +109,68 @@ La documentación Swagger interactiva estará disponible de forma automática en
 
 Ingesta y procesamiento asíncrono de un lote de tareas de scraping.
 
-#### Ejemplo de Cuerpo de Solicitud (JSON):
+#### 📋 Esquema del Cuerpo de la Petición (`parser_config` Universal)
+
+El campo `parser_config` soporta la extracción tanto de **Entidades Únicas** (sin `container`) como de **Colecciones / Listados de Ítems** (usando `container`). Además, los selectores pueden ser un `string` simple o un objeto `FieldSpec` para extraer atributos HTML (como `href`, `src`, `data-*`).
+
+#### Ejemplo 1: Extracción de Colección / Listado (Resultados, Catálogos, Inmuebles)
 
 ```json
 {
-  "job_id": "mision-analisis-precios-2026",
+  "job_id": "catalogo-productos-2026",
   "tasks": [
     {
-      "url": "https://example.com/producto/123",
+      "url": "https://example.com/tienda/portatiles",
       "parser_type": "static_css",
       "parser_config": {
+        "container": "article.product-card",
         "selectors": {
-          "titulo": "h1.product-title",
-          "precio": "span.price-tag"
+          "nombre": "h2.title",
+          "precio": "span.price",
+          "enlace_detalle": {
+            "selector": "a.product-link",
+            "attribute": "href"
+          },
+          "imagen": {
+            "selector": "img.thumb",
+            "attribute": "src"
+          }
         }
       },
       "priority": 5,
-      "max_depth": 1,
       "max_retries": 3
     }
   ],
   "context": {
-    "tienda": "Amazon Spain",
-    "categoria": "Electronica"
+    "categoria": "portatiles"
   }
+}
+```
+
+#### Ejemplo 2: Extracción de Entidad Única (Ficha de Producto, Noticia, Detalle)
+
+```json
+{
+  "job_id": "detalle-producto-2026",
+  "tasks": [
+    {
+      "url": "https://example.com/producto/123",
+      "parser_type": "dynamic_playwright",
+      "parser_config": {
+        "selectors": {
+          "titulo": "h1.product-title",
+          "precio": "span.price-tag",
+          "imagen_principal": {
+            "selector": "img#main-image",
+            "attribute": "src"
+          }
+        },
+        "timeout_ms": 15000,
+        "wait_until": "domcontentloaded"
+      },
+      "priority": 10
+    }
+  ]
 }
 ```
 
@@ -143,11 +181,12 @@ Ingesta y procesamiento asíncrono de un lote de tareas de scraping.
 
 ```json
 {
-  "job_id": "mision-analisis-precios-2026",
+  "job_id": "catalogo-productos-2026",
   "status": "accepted",
   "message": "El procesamiento ha comenzado en segundo plano."
 }
 ```
+
 
 ---
 

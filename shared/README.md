@@ -93,21 +93,34 @@ graph TD
 - **`ParserValidatedMixin`**: Mixin de Pydantic que intercepta la validación de `parser_config`. Si la validación contra el submódulo cargado falla, recopila el esquema esperado y lanza una excepción limpia (`invalid_parser_config`) que la API intercepta y devuelve de forma legible al usuario.
 
 #### Ejemplo de Contratos Específicos:
+* **`base.py`**:
+```python
+class FieldSpec(BaseModel):
+    selector: str
+    attribute: Optional[str] = None  # Atributo HTML a extraer (ej: 'href', 'src')
+    default: Optional[Any] = None
+    multiple: bool = False           # Retorna lista si es True dentro de un contenedor
+
+FieldDefinition = Union[str, FieldSpec]
+```
 * **`static_css.py`**:
 ```python
 class Config(BaseParserConfig):
-    selectors: Dict[str, str] = Field(..., min_length=1)  # Mapeo obligatorio de selectores
+    container: Optional[str] = None  # Contenedor padre opcional para colecciones
+    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
 ```
 * **`dynamic_playwright.py`**:
 ```python
 class Config(BaseParserConfig):
-    selectors: Dict[str, str] = Field(..., min_length=1)
+    container: Optional[str] = None  # Contenedor padre opcional para colecciones
+    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
     timeout_ms: PositiveInt = Field(default=30000)
     wait_until: str = Field(default="domcontentloaded")
     wait_for_selector: Optional[str] = Field(default=None)
     scroll_to_bottom: bool = Field(default=False)
     click_selectors: Optional[List[str]] = Field(default=None)
 ```
+
 
 ---
 

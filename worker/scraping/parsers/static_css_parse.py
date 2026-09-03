@@ -5,14 +5,19 @@ from scraping.interfaces.interfaces import ParseResult
 from .base import BaseParser
 from shared.models import ScrapingTask
 from infrastructure.network.client import SecureNetworkClient
-from scraping.security.honeypot_guard import HoneypotGuard
+from .extractor import UniversalDOMExtractor
 
 
 class StaticCSSParser(BaseParser):
-    def __init__(self, network_client: SecureNetworkClient, honeypot_guard: Optional[HoneypotGuard] = None):
+    def __init__(
+        self,
+        network_client: SecureNetworkClient,
+        extractor: Optional[UniversalDOMExtractor] = None
+    ):
         super().__init__()
         self.network_client = network_client
-        self.honeypot_guard = honeypot_guard
+        self.extractor = extractor or UniversalDOMExtractor()
+
 
     async def parse(self, task: ScrapingTask) -> ParseResult:
         """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
@@ -39,27 +44,26 @@ class StaticCSSParser(BaseParser):
             response.raise_for_status()
 
             soup = BeautifulSoup(response.text, "html.parser")
-            extracted = {}
-            is_empty = []  # Bandera para detectar si no se extrajo nada
+            container = task.parser_config.get("container")
 
-            for field, selector in selectors.items():
-                elements = soup.select(selector)
+            extracted = self.extractor.extract_from_soup(
+                soup=soup,
+                selectors=selectors,
+                container=container
+            )
 
-                # 🛡️ FILTRADO ACTIVO DE HONEYPOTS (Si la dependencia está inyectada)
-                if self.honeypot_guard:
-                    elements = self.honeypot_guard.filter_static_elements(elements)
 
-                extracted[field] = [el.get_text(
-                    strip=True) for el in elements]
-                if elements:
-                    is_empty.append(False)
-                else:
-                    is_empty.append(True)
 
-            # Si todos los selectores resultaron en listas vacías, consideramos que el esquema es inválido (posible cambio de DOM)
-            if not selectors or all(is_empty):
+            # Validación de datos extraídos vacíos
+            if not extracted:
                 raise ScrapingError(
                     ErrorCategory.INVALID_SCHEMA, "Selectores no extrajeron datos (posible cambio de DOM)", task.task_id)
+            elif isinstance(extracted, dict):
+                is_empty = [not v for v in extracted.values()]
+                if all(is_empty):
+                    raise ScrapingError(
+                        ErrorCategory.INVALID_SCHEMA, "Selectores no extrajeron datos (posible cambio de DOM)", task.task_id)
+
 
         except ScrapingError:
             raise
