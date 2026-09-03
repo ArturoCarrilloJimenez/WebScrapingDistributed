@@ -11,6 +11,8 @@ dependencies = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.14.0",
     "shared",
+    "playwright>=1.49.0",
+    "playwright-stealth>=1.0.6",
 ]
 
 [dependency-groups]

@@ -90,6 +90,14 @@ class WorkerController:
         if hasattr(self.consumer, "close"):
             await self.consumer.close()
 
+        # PASO 6: Cerrar navegadores de Playwright si existen
+        try:
+            from scraping.parsers.dinamic_parse import DynamicParser
+            await DynamicParser.close_browser()
+            log.info("Navegadores Playwright cerrados limpiamente.")
+        except Exception as e:
+            log.error(f"Error cerrando navegadores Playwright en el shutdown: {e}")
+
     async def run(self) -> None:
         """Punto de entrada principal (El bucle infinito). Flujo plano y legible."""
         self._main_task = asyncio.current_task()

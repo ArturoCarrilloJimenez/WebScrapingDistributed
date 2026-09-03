@@ -40,6 +40,47 @@ async def test_parser_extraction_success():
         assert res["headline"] == ["Noticia de Impacto"]
 
 
+async def test_parser_container_extraction_success():
+    """Prueba la extracción estructurada por contenedor de ítems."""
+    html = """
+    <html><body>
+        <div class="card">
+            <h2 class="title">Producto A</h2>
+            <span class="price">10€</span>
+            <a class="link" href="/p/a">Ver</a>
+        </div>
+        <div class="card">
+            <h2 class="title">Producto B</h2>
+            <span class="price">20€</span>
+            <a class="link" href="/p/b">Ver</a>
+        </div>
+    </body></html>
+    """
+    client = create_mock_client(200, html)
+    parser = StaticCSSParser(network_client=client)
+
+    task = ScrapingTask(
+        job_id="j_01", batch_id="b_01", task_id="t_02",
+        url="https://example.com/catalog", parser_type="static_css",
+        parser_config={
+            "container": "div.card",
+            "selectors": {
+                "nombre": "h2.title",
+                "precio": "span.price",
+                "link": {"selector": "a.link", "attribute": "href"}
+            }
+        },
+        retry_count=0, max_retries=3
+    )
+
+    with patch.object(parser, "_prepare_result", side_effect=lambda t, ext: ext):
+        res = await parser.parse(task)
+        assert len(res) == 2
+        assert res[0] == {"nombre": "Producto A", "precio": "10€", "link": "/p/a"}
+        assert res[1] == {"nombre": "Producto B", "precio": "20€", "link": "/p/b"}
+
+
+
 @pytest.mark.parametrize("status, expected_category", [
     (404, ErrorCategory.NOT_FOUND),
     (403, ErrorCategory.BLOCKED),
