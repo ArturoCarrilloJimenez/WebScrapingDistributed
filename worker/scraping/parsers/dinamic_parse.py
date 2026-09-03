@@ -78,14 +78,30 @@ class DynamicParser(BaseParser):
         # 3. Obtener instancia compartida del navegador
         browser = await self.get_browser()
         
-        # 4. Crear BrowserContext aislado
+        # Obtener versión real instanciada de Chromium y su versión mayor
+        browser_version = browser.version
+        major_version = browser_version.split(".")[0] if browser_version else "130"
+        dynamic_user_agent = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser_version} Safari/537.36"
+
+        # 4. Crear BrowserContext aislado con Client Hints coherentes
         context = None
         try:
             context = await browser.new_context(
                 proxy=playwright_proxy,
-                user_agent=DEFAULT_USER_AGENT,
-                viewport={"width": 1280, "height": 720}
+                user_agent=dynamic_user_agent,
+                viewport={"width": 1280, "height": 720},
+                extra_http_headers={
+                    "Sec-Ch-Ua": f'"Chromium";v="{major_version}", "Google Chrome";v="{major_version}", "Not?A_Brand";v="99"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Sec-Fetch-User": "?1",
+                    "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+                }
             )
+
             # Aplicar límites de tiempo por defecto
             context.set_default_navigation_timeout(config.timeout_ms)
             context.set_default_timeout(config.timeout_ms)
