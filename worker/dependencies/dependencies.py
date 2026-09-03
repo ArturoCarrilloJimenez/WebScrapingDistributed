@@ -68,10 +68,21 @@ def get_secure_network_client() -> SecureNetworkClient:
     )
 
 
+from scraping.security.honeypot_guard import HoneypotGuard
+
+_honeypot_guard_instance = HoneypotGuard()
+
+
+def get_honeypot_guard() -> HoneypotGuard:
+    return _honeypot_guard_instance
+
+
 def get_parser_factory() -> ParserFactory:
-    # La factoría se alimenta del cliente centralizado de red
+    # La factoría se alimenta del cliente centralizado de red y de la capa de seguridad
     network_client = get_secure_network_client()
-    return ParserFactory(network_client=network_client)
+    honeypot_guard = get_honeypot_guard()
+    return ParserFactory(network_client=network_client, honeypot_guard=honeypot_guard)
+
 
 
 def get_worker_controller(max_concurrency: int = settings.worker_num_max_concurrent_tasks) -> WorkerController:

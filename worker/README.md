@@ -107,6 +107,16 @@ Para superar las barreras de protección de los servidores web objetivo, el micr
 
 ---
 
+## 🛡️ Capa Activa de Seguridad Anti-Bot (`HoneypotGuard`)
+
+Para evitar trampas invisibles diseñadas para detectar scrapers, el microservicio integra la clase [`HoneypotGuard`](scraping/security/honeypot_guard.py), inyectada mediante el contenedor de dependencias (`dependencies.py`) y la factoría (`factory.py`):
+
+- **Análisis Estático (BeautifulSoup):** Evalúa e intercepta nodos `bs4.Tag` con reglas CSS de ocultación (`display:none`, `visibility:hidden`, `opacity:0`, `font-size:0`, `left:-9999px`, `width:0`), clases invisibles (`hidden`, `sr-only`, `d-none`), atributos `aria-hidden="true"`, `tabindex="-1"`, bloques `<noscript>` o enlaces vacíos/javascript.
+- **Análisis Dinámico Optimizado en Lote (Playwright):** Ejecuta **1 sola evaluación en lote mediante JavaScript en Chromium** (`page.evaluate`), analizando en C++/V8 todos los elementos de la página (`display`, `visibility`, `opacity`, `pointerEvents`, dimensiones `width/height > 1px`, coordenadas `x/y >= 0`) y devolviendo los locators seguros en **~15 milisegundos**.
+
+---
+
+
 ## 🛠️ Configuración y Variables de Entorno
 
 El archivo `.env` en la raíz controla el comportamiento del Worker:

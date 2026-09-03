@@ -1,15 +1,18 @@
+from typing import Optional
 from bs4 import BeautifulSoup
 from scraping.exceptions import ErrorCategory, ScrapingError
 from scraping.interfaces.interfaces import ParseResult
 from .base import BaseParser
 from shared.models import ScrapingTask
 from infrastructure.network.client import SecureNetworkClient
+from scraping.security.honeypot_guard import HoneypotGuard
 
 
 class StaticCSSParser(BaseParser):
-    def __init__(self, network_client: SecureNetworkClient):
+    def __init__(self, network_client: SecureNetworkClient, honeypot_guard: Optional[HoneypotGuard] = None):
         super().__init__()
         self.network_client = network_client
+        self.honeypot_guard = honeypot_guard
 
     async def parse(self, task: ScrapingTask) -> ParseResult:
         """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
@@ -41,6 +44,11 @@ class StaticCSSParser(BaseParser):
 
             for field, selector in selectors.items():
                 elements = soup.select(selector)
+
+                # 🛡️ FILTRADO ACTIVO DE HONEYPOTS (Si la dependencia está inyectada)
+                if self.honeypot_guard:
+                    elements = self.honeypot_guard.filter_static_elements(elements)
+
                 extracted[field] = [el.get_text(
                     strip=True) for el in elements]
                 if elements:

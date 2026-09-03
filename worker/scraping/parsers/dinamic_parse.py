@@ -10,6 +10,9 @@ from infrastructure.network.client import SecureNetworkClient
 from scraping.exceptions import ErrorCategory, ScrapingError
 from shared.models.parse_config.dynamic_playwright import Config as PlaywrightConfig
 
+from typing import Optional
+from scraping.security.honeypot_guard import HoneypotGuard
+
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 class DynamicParser(BaseParser):
@@ -17,9 +20,11 @@ class DynamicParser(BaseParser):
     _browser = None
     _lock = asyncio.Lock()
 
-    def __init__(self, network_client: SecureNetworkClient):
+    def __init__(self, network_client: SecureNetworkClient, honeypot_guard: Optional[HoneypotGuard] = None):
         super().__init__()
         self.network_client = network_client
+        self.honeypot_guard = honeypot_guard
+
 
     @classmethod
     async def get_browser(cls):
@@ -126,15 +131,20 @@ class DynamicParser(BaseParser):
             is_empty = []
             
             for field, selector in config.selectors.items():
-                elements = page.locator(selector)
-                count = await elements.count()
-                values = [await elements.nth(i).inner_text() for i in range(count)]
+                # 🛡️ FILTRADO ACTIVO EN LOTE DE HONEYPOTS EN CHROMIUM (Si la dependencia está inyectada)
+                if self.honeypot_guard:
+                    locators = await self.honeypot_guard.filter_playwright_locators_in_batch(page, selector)
+                else:
+                    locators = await page.locator(selector).all()
+
+                values = [await loc.inner_text() for loc in locators]
                 extracted[field] = [val.strip() for val in values if val.strip()]
                 
-                if count > 0 and len(extracted[field]) > 0:
+                if len(locators) > 0 and len(extracted[field]) > 0:
                     is_empty.append(False)
                 else:
                     is_empty.append(True)
+
                     
             # Si todos los selectores resultan en listas vacías, lanzamos error contractual
             if not config.selectors or all(is_empty):

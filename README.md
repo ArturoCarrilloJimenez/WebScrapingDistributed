@@ -20,9 +20,11 @@ El usuario envía una carga masiva de trabajo y recibe una respuesta instantáne
 | **Arquitectura asíncrona**        | Implementación nativa con FastAPI y `asyncio` para evitar bloqueos de I/O, tanto en el orquestador como en los motores de consumo y extracción.   |
 | **Contratos de Datos Robustos**   | Validación estricta mediante **Pydantic** en todas las fases del ciclo de vida del mensaje, garantizando consistencia en las colas.               |
 | **Rotación de Proxies Avanzada**  | Soporte para pools de proxies estáticos y gateways residenciales (backconnect) con persistencia de sesión por tarea (**Sticky Sessions**).        |
+| **Capa Activa de Seguridad Anti-Bot**| Filtrado activo preventivo de Honeypots (`HoneypotGuard`) en HTML estático (bs4) y en lote dinámico (~15 ms) en Chromium (Playwright). |
 | **Resiliencia & Backoff Dinámico**| Mecanismo de reintentos inteligente con cálculo de tiempo de espera dinámico adaptado a la categoría del error (bloqueos, timeouts, caídas 5xx).  |
 | **Almacenamiento en S3 (Sink)**   | Estructuración en JSON Lines (.jsonl) y guardado asíncrono en S3 mediante un buffer en memoria RAM para amortizar costes de red y CPU.       |
 | **Infraestructura Cloud-Native**  | Preparado para entornos AWS (SQS/S3/DLQ) y emulado localmente de forma eficiente con **Floci** (emulador open source sin restricciones de LocalStack).|
+
 
 ---
 
@@ -195,9 +197,11 @@ WebScrapingDistributed/
 │   │   └── task/                   # Adaptador de consumo asíncrono de SQS
 │   ├── scraping/                   # Motores de análisis y extracción
 │   │   ├── parsers/                # Motores de parseo (StaticCSSParser, DynamicPlaywrightParser) y factorías
+│   │   ├── security/               # Capa activa de seguridad Anti-Bot (HoneypotGuard)
 │   │   ├── services/               # Servicios de scraping (JobBufferService)
 │   │   ├── controller.py           # Orquestador de consumo, concurrencia y tolerancia a fallos
 │   │   └── exceptions.py           # Clasificación de excepciones (Fatal, Blocked, Timeout)
+
 │   ├── test/                       # Tests unitarios y de integración de lógica y reintentos
 │   ├── main.py                     # Inicializador del Worker y captura de señales (Graceful Shutdown)
 │   └── Dockerfile
