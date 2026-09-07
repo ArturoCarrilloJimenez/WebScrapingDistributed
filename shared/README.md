@@ -26,19 +26,19 @@ shared/
 └── shared/                     # Código fuente del paquete
     ├── __init__.py             # Exportaciones públicas de modelos y utilidades
     ├── logging.py              # Logger unificado, estructurado y resiliente
-    └── models/                 # Modelos de validación Pydantic
-        ├── __init__.py
+    └──        ├── __init__.py
         ├── scraping_task.py    # Modelo y contrato del mensaje SQS
         ├── batch_task_response.py # Modelos de respuesta REST para lotes
         ├── parse_type/         # Tipos y motores de scraping soportados
         │   ├── __init__.py
-        │   └── enum.py         # Enum de ParserType (static_css, playwright_amazon)
+        │   └── enum.py         # Enum de ParserType (static_css, dynamic_playwright)
         └── parse_config/       # Validación contractual y perezosa de motores
             ├── __init__.py
             ├── base.py         # Clase base inmutable (BaseParserConfig)
             ├── factory.py      # Factory para carga perezosa de configuraciones
             ├── validators.py   # Mixin interceptor de validación dinámica
-            └── static_css.py   # Contrato específico del motor Static CSS
+            ├── static_css.py   # Contrato específico del motor Static CSS
+            └── dynamic_playwright.py # Contrato específico del motor Dynamic Playwright
 ```
 
 ---
@@ -71,7 +71,9 @@ from shared.models import ScrapingTask
 
 ### 2. Validación Dinámica de Contratos (Factory + Mixin)
 
-Uno de los diseños más avanzados del sistema es la validación dinámica en la ingesta. Cada motor de scraping requiere parámetros distintos (por ejemplo, `static_css` requiere selectores CSS y esperar a un elemento, mientras que un futuro motor de IA o Playwright requerirá selectores de campos o interacciones complejas).
+Uno de los diseños más avanzados del sistema es la validación dinámica en la ingesta. Cada motor de scraping requiere parámetros distintos:
+* `static_css`: requiere selectores CSS obligatorios (`selectors`).
+* `dynamic_playwright`: requiere selectores y parámetros de interacción opcionales (tales como `timeout_ms`, `wait_until`, `wait_for_selector`, `scroll_to_bottom`, `click_selectors`).
 
 Para validar esto sin acoplar los esquemas de forma rígida:
 
@@ -80,21 +82,45 @@ graph TD
     Data[Petición JSON] -->|Instancia| ScrapingTask[ScrapingTask Model]
     ScrapingTask -->|Valida parser_config| PVM[ParserValidatedMixin]
     PVM -->|Consulta parser_type| CF[ContractFactory]
-    CF -->|Lazy Load| SC[Config en static_css.py]
+    CF -->|Lazy Load| SC[Config en dynamic_playwright.py o static_css.py]
     SC -->|Valida| Result{¿Sigue el contrato?}
     Result -->|Sí| OK[Mensaje Validado e Inmutable]
     Result -->|No| Err[CustomError con Expected Schema]
 ```
 
 - **`BaseParserConfig`**: Define las reglas para los submódulos. Es inmutable (`frozen=True`) para proteger los hilos de ejecución concurrentes y no permite campos ajenos (`extra='forbid'`).
-- **`ContractFactory`**: Implementa **Carga Perezosa (Lazy Load)**. Lee el valor del `ParserType` e importa dinámicamente el submódulo de configuración correspondiente (ej. `static_css.py`), extrayendo su clase `Config` en tiempo de ejecución.
+- **`ContractFactory`**: Implementa **Carga Perezosa (Lazy Load)**. Lee el valor del `ParserType` e importa dinámicamente el submódulo de configuración correspondiente (ej. `dynamic_playwright.py`), extrayendo su clase `Config` en tiempo de ejecución.
 - **`ParserValidatedMixin`**: Mixin de Pydantic que intercepta la validación de `parser_config`. Si la validación contra el submódulo cargado falla, recopila el esquema esperado y lanza una excepción limpia (`invalid_parser_config`) que la API intercepta y devuelve de forma legible al usuario.
 
-#### Ejemplo de Contrato Específico (`static_css.py`):
+#### Ejemplo de Contratos Específicos:
+* **`base.py`**:
+```python
+class FieldSpec(BaseModel):
+    selector: str
+    attribute: Optional[str] = None  # Atributo HTML a extraer (ej: 'href', 'src')
+    default: Optional[Any] = None
+    multiple: bool = False           # Retorna lista si es True dentro de un contenedor
+
+FieldDefinition = Union[str, FieldSpec]
+```
+* **`static_css.py`**:
 ```python
 class Config(BaseParserConfig):
-    selectors: Dict[str, str] = Field(..., min_length=1)  # Mapeo obligatorio de selectores
+    container: Optional[str] = None  # Contenedor padre opcional para colecciones
+    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
 ```
+* **`dynamic_playwright.py`**:
+```python
+class Config(BaseParserConfig):
+    container: Optional[str] = None  # Contenedor padre opcional para colecciones
+    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
+    timeout_ms: PositiveInt = Field(default=30000)
+    wait_until: str = Field(default="domcontentloaded")
+    wait_for_selector: Optional[str] = Field(default=None)
+    scroll_to_bottom: bool = Field(default=False)
+    click_selectors: Optional[List[str]] = Field(default=None)
+```
+
 
 ---
 
@@ -132,22 +158,23 @@ uv sync --reinstall-package shared
 
 ## ➕ Cómo añadir un Nuevo Parser al Sistema
 
-Para expandir el sistema con un nuevo motor (ej. `playwright_amazon`):
+Para expandir el sistema con un nuevo motor (ej. `llm_adaptive`):
 
 1. **Añadir el Tipo**: En `shared/shared/models/parse_type/enum.py`, agrega el nuevo valor al Enum:
    ```python
    class ParserType(str, Enum):
        STATIC_CSS = "static_css"
-       PLAYWRIGHT_AMAZON = "playwright_amazon"
+       DINAMIC_PLAYWRIGHT = "dynamic_playwright"
+       LLM_ADAPTIVE = "llm_adaptive"
    ```
-2. **Crear su Contrato**: En `shared/shared/models/parse_config/`, crea un archivo que coincida exactamente con el valor del enum (ej. `playwright_amazon.py`):
+2. **Crear su Contrato**: En `shared/shared/models/parse_config/`, crea un archivo que coincida exactamente con el valor del enum (ej. `llm_adaptive.py`):
    ```python
-   # shared/shared/models/parse_config/playwright_amazon.py
+   # shared/shared/models/parse_config/llm_adaptive.py
    from pydantic import Field
    from .base import BaseParserConfig
 
    class Config(BaseParserConfig):
-       product_asin: str = Field(..., min_length=10, max_length=10)
-       extract_reviews: bool = Field(default=True)
+       prompt: str = Field(..., min_length=5)
+       model_name: str = Field(default="gemini-1.5-flash")
    ```
-3. ¡Listo! La `ContractFactory` importará dinámicamente tu nuevo esquema y el Producer validará de forma inmediata las nuevas peticiones REST correspondientes a `playwright_amazon`.
+3. ¡Listo! La `ContractFactory` importará dinámicamente tu nuevo esquema y el Producer validará de forma inmediata las nuevas peticiones REST correspondientes a `llm_adaptive`.

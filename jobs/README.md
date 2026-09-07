@@ -68,7 +68,7 @@ graph TD
 ### 2. [Futuros Jobs] (Mantenimiento, Backups, Cargas ETL, etc.)
 Para añadir un nuevo Job:
 1. Crea tu archivo script en la raíz de `jobs/` (ej. `limpieza_temporales.py`).
-2. Agrega las configuraciones necesarias en [jobs/config/settings.py](file:///C:/proyectos/WebScrapingDistributed/jobs/config/settings.py).
+2. Agrega las configuraciones necesarias en [jobs/config/settings.py](config/settings.py).
 3. Añade su descripción técnica y su flujo en este catálogo para mantener la visibilidad arquitectónica del sistema.
 
 ---

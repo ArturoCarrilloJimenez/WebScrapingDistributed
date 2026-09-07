@@ -33,9 +33,8 @@ COPY shared/ ./shared/
 COPY worker/ ./worker/
 
 # Instalar navegadores de Playwright y dependencias del sistema para Linux
-RUN /app/.venv/bin/playwright install --with-deps chromium
-
-RUN groupadd --system appgroup && useradd --system -g appgroup appuser \
+RUN /app/.venv/bin/playwright install --with-deps chromium \
+    && groupadd --system appgroup && useradd --system -g appgroup appuser \
     && chown -R appuser:appgroup /app
 
 USER appuser

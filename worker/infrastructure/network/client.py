@@ -24,12 +24,22 @@ class SecureNetworkClient:
 
     def _generate_contextual_headers(self, url: str) -> dict:
         parsed_url = urlparse(url)
+        chrome_major = "130"
         return {
+            "User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_major}.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+            "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
             "Referer": f"{parsed_url.scheme}://{parsed_url.netloc}/",
             "Cache-Control": "max-age=0",
+            "Sec-Ch-Ua": f'"Chromium";v="{chrome_major}", "Google Chrome";v="{chrome_major}", "Not?A_Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
         }
+
 
     async def _close_session_with_grace(self, session: AsyncSession, domain: str, delay: float = 15.0):
         """
