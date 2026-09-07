@@ -13,6 +13,11 @@ def test_factory_resolves_valid_parser():
     assert isinstance(parser, StaticCSSParser)
     assert parser.network_client == mock_client
 
+    from scraping.parsers.dinamic_parse import DynamicParser
+    parser_dyn = factory.get_parser(ParserType.DINAMIC_PLAYWRIGHT)
+    assert isinstance(parser_dyn, DynamicParser)
+    assert parser_dyn.network_client == mock_client
+
 
 def test_factory_raises_value_error_for_unknown_parser():
     """Valida que la factoría lance ValueError si se le solicita un tipo de parser no registrado."""

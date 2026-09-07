@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_NO_DEV=1 \
-    UV_CACHE_DIR="/tmp/.uv-cache"
+    UV_CACHE_DIR="/tmp/.uv-cache" \
+    PLAYWRIGHT_BROWSERS_PATH="/app/.playwright-browsers"
 
 WORKDIR /app
 
@@ -30,6 +31,9 @@ RUN --mount=type=cache,target=/tmp/.uv-cache \
 
 COPY shared/ ./shared/
 COPY worker/ ./worker/
+
+# Instalar navegadores de Playwright y dependencias del sistema para Linux
+RUN /app/.venv/bin/playwright install --with-deps chromium
 
 RUN groupadd --system appgroup && useradd --system -g appgroup appuser \
     && chown -R appuser:appgroup /app
