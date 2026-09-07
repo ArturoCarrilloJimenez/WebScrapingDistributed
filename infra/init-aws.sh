@@ -36,6 +36,10 @@ for type in static dynamic; do
         dynamic)
             VISIBILITY_TIMEOUT=900
             ;;
+        *)
+            echo "Invalid type: $type"
+            exit 1
+            ;;
     esac
 
     # 3. Crear la Cola Principal vinculada a la DLQ

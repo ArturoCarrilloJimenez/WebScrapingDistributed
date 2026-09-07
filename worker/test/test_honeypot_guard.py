@@ -66,3 +66,25 @@ def test_honeypot_guard_static_empty_hrefs():
 
     assert len(safe_elements) == 1
     assert safe_elements[0]["id"] == "valid"
+
+
+def test_honeypot_guard_subfunctions_directly():
+    """Prueba de unidad directa para los métodos auxiliares de HoneypotGuard."""
+    guard = HoneypotGuard()
+    soup = BeautifulSoup("""
+        <div id="div1" aria-hidden="true" tabindex="-1">Oculto</div>
+        <noscript><span id="span1">NoScript</span></noscript>
+        <a id="a1" href="javascript:alert(1)">JS Link</a>
+        <a id="a2" href="https://valid.com">Valid Link</a>
+    """, "html.parser")
+
+    div1 = soup.select_one("#div1")
+    span1 = soup.select_one("#span1")
+    a1 = soup.select_one("#a1")
+    a2 = soup.select_one("#a2")
+
+    assert guard._has_accessibility_hidden_attrs(div1) is True
+    assert guard._is_inside_noscript(span1) is True
+    assert guard._is_invalid_anchor_link(a1) is True
+    assert guard._is_invalid_anchor_link(a2) is False
+    assert guard.is_static_node_honeypot(None) is False

@@ -33,7 +33,7 @@ def aws_credentials():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def sqs_mock():
     """Start moto mock for SQS and create static and dynamic test queues."""
     with mock_aws():

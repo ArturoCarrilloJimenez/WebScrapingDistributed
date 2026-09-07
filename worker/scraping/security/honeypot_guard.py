@@ -22,8 +22,8 @@ class HoneypotGuard:
             re.compile(r"visibility\s*:\s*hidden", re.IGNORECASE),
             re.compile(r"opacity\s*:\s*0(\.0+)?", re.IGNORECASE),
             re.compile(r"font-size\s*:\s*0(px|em|rem)?", re.IGNORECASE),
-            re.compile(r"left\s*:\s*-[0-9]{2,}", re.IGNORECASE),
-            re.compile(r"top\s*:\s*-[0-9]{2,}", re.IGNORECASE),
+            re.compile(r"left\s*:\s*-\d{2,}", re.IGNORECASE),
+            re.compile(r"top\s*:\s*-\d{2,}", re.IGNORECASE),
             re.compile(r"width\s*:\s*0(px)?", re.IGNORECASE),
             re.compile(r"height\s*:\s*0(px)?", re.IGNORECASE),
         ]
@@ -38,6 +38,44 @@ class HoneypotGuard:
     # 🔍 ANÁLISIS ESTÁTICO (BeautifulSoup bs4.Tag)
     # ------------------------------------------------------------------
 
+    def _has_hidden_style(self, node: Tag) -> bool:
+        """Verifica si el atributo 'style' en línea oculta el nodo mediante reglas CSS."""
+        style = node.get("style", "")
+        if not style:
+            return False
+
+        for pattern in self._style_honeypot_patterns:
+            if pattern.search(style):
+                self.log.debug(f"Honeypot detectado por style='{style}' en <{node.name}>")
+                return True
+
+        return False
+
+    def _has_suspicious_class(self, node: Tag) -> bool:
+        """Verifica si las clases CSS del nodo contienen clases de ocultación o trampas."""
+        classes = node.get("class", [])
+        classes_set = set(classes) if isinstance(classes, list) else set(classes.split())
+        if self._suspicious_classes.intersection(classes_set):
+            self.log.debug(f"Honeypot detectado por clase sospechosa en <{node.name}>")
+            return True
+
+        return False
+
+    def _has_accessibility_hidden_attrs(self, node: Tag) -> bool:
+        """Verifica si el nodo tiene atributos ARIA o de tabulación que indiquen ocultación."""
+        return node.get("aria-hidden") == "true" or node.get("tabindex") == "-1"
+
+    def _is_inside_noscript(self, node: Tag) -> bool:
+        """Verifica si el nodo está dentro de un contenedor <noscript>."""
+        return node.find_parent("noscript") is not None
+
+    def _is_invalid_anchor_link(self, node: Tag) -> bool:
+        """Para etiquetas <a>, desestima enlaces con hrefs vacíos, '#' o scripts 'javascript:'."""
+        if node.name != "a":
+            return False
+        href = node.get("href", "").strip()
+        return not href or href == "#" or href.startswith("javascript:")
+
     def is_static_node_honeypot(self, node: Tag) -> bool:
         """Evalúa si un nodo HTML estático es un Honeypot o elemento oculto.
 
@@ -50,37 +88,13 @@ class HoneypotGuard:
         if not node or not hasattr(node, "get"):
             return False
 
-        # 1. Atributo 'style' en línea
-        style = node.get("style", "")
-        if style:
-            for pattern in self._style_honeypot_patterns:
-                if pattern.search(style):
-                    self.log.debug(f"Honeypot detectado por style='{style}' en <{node.name}>")
-                    return True
-
-        # 2. Clases CSS ocultas
-        classes = node.get("class", [])
-        classes_set = set(classes) if isinstance(classes, list) else set(classes.split())
-        if self._suspicious_classes.intersection(classes_set):
-            self.log.debug(f"Honeypot detectado por clase sospechosa en <{node.name}>")
-            return True
-
-        # 3. Atributos de accesibilidad/ocultación
-        if node.get("aria-hidden") == "true" or node.get("tabindex") == "-1":
-            return True
-
-        # 4. Dentro de <noscript>
-        if node.find_parent("noscript"):
-            return True
-
-        # 5. Para etiquetas <a>, desestimar hrefs vacíos, '#' o scripts 'javascript:'
-        if node.name == "a":
-            href = node.get("href", "").strip()
-            if not href or href == "#" or href.startswith("javascript:"):
-                return True
-
-        return False
-
+        return (
+            self._has_hidden_style(node)
+            or self._has_suspicious_class(node)
+            or self._has_accessibility_hidden_attrs(node)
+            or self._is_inside_noscript(node)
+            or self._is_invalid_anchor_link(node)
+        )
 
     def filter_static_elements(self, elements: List[Tag]) -> List[Tag]:
         """Filtra una lista de nodos BeautifulSoup descartando activamente los Honeypots.

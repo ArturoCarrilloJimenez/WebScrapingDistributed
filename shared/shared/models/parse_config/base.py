@@ -1,4 +1,4 @@
-from typing import Optional, Union, Any
+from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,7 +21,7 @@ class FieldSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
-FieldDefinition = Union[str, FieldSpec]
+FieldDefinition = str | FieldSpec
 
 
 class BaseParserConfig(BaseModel):
@@ -33,4 +33,3 @@ class BaseParserConfig(BaseModel):
         extra='forbid',  # No permitimos basura extra en la config
         frozen=True     # Inmutable para mayor seguridad en procesos async
     )
-

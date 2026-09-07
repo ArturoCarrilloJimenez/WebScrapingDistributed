@@ -59,8 +59,7 @@ class StaticCSSParser(BaseParser):
                 raise ScrapingError(
                     ErrorCategory.INVALID_SCHEMA, "Selectores no extrajeron datos (posible cambio de DOM)", task.task_id)
             elif isinstance(extracted, dict):
-                is_empty = [not v for v in extracted.values()]
-                if all(is_empty):
+                if all(not v for v in extracted.values()):
                     raise ScrapingError(
                         ErrorCategory.INVALID_SCHEMA, "Selectores no extrajeron datos (posible cambio de DOM)", task.task_id)
 
