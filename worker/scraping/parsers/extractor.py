@@ -75,8 +75,8 @@ class UniversalDOMExtractor:
         selector: str
     ) -> List[Tag]:
         """Selecciona elementos coincidentes en el nodo y filtra trampas honeypot si aplica."""
-        if not selector:
-            return []
+        if not selector or selector == "self":
+            return [node] if isinstance(node, Tag) else []
         elements = node.select(selector)
         if self.honeypot_guard:
             elements = self.honeypot_guard.filter_static_elements(elements)

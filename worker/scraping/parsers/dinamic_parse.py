@@ -1,10 +1,12 @@
 import asyncio
+import gc
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 from playwright_stealth import Stealth
 
+from config.settings import settings
 from scraping.parsers.base import BaseParser
 from shared.models import ScrapingTask
 from scraping.interfaces.interfaces import ParseResult
@@ -22,6 +24,7 @@ class DynamicParser(BaseParser):
 
     _playwright = None
     _browser = None
+    _tasks_processed_count = 0
     _lock = asyncio.Lock()
 
     def __init__(
@@ -34,33 +37,58 @@ class DynamicParser(BaseParser):
         self.extractor = extractor or UniversalDOMExtractor()
 
     @classmethod
+    async def _close_browser_unlocked(cls):
+        """Método interno sin lock para cerrar el navegador y liberar recursos."""
+        if cls._browser:
+            try:
+                await cls._browser.close()
+            except Exception:
+                pass
+            cls._browser = None
+        if cls._playwright:
+            try:
+                await cls._playwright.stop()
+            except Exception:
+                pass
+            cls._playwright = None
+
+    @classmethod
     async def get_browser(cls):
-        """Inicializa Chromium de forma perezosa y persistente (Singleton de Navegador)."""
+        """Inicializa o recicla Chromium de forma segura según el contador de tareas procesadas."""
         async with cls._lock:
+            # Reciclar el navegador si superó el umbral de tareas configurado para evitar fugas de V8/RAM
+            if cls._browser and cls._tasks_processed_count >= settings.playwright_max_tasks_per_browser:
+                import logging
+                log = logging.getLogger("DynamicParser")
+                log.info(
+                    f"Reciclando instancia de Chromium tras {cls._tasks_processed_count} tareas procesadas (Límite: {settings.playwright_max_tasks_per_browser}) para liberar memoria RAM/V8."
+                )
+                await cls._close_browser_unlocked()
+                gc.collect()
+
             if cls._browser is None:
                 cls._playwright = await async_playwright().start()
                 cls._browser = await cls._playwright.chromium.launch(
                     headless=True,
-                    args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+                    args=[
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-software-rasterizer",
+                        f"--js-flags=--max-old-space-size={settings.playwright_v8_max_old_space_size_mb}"
+                    ]
                 )
+                cls._tasks_processed_count = 0
+
             return cls._browser
 
     @classmethod
     async def close_browser(cls):
         """Libera los recursos del navegador al apagar el worker."""
         async with cls._lock:
-            if cls._browser:
-                try:
-                    await cls._browser.close()
-                except Exception:
-                    pass
-                cls._browser = None
-            if cls._playwright:
-                try:
-                    await cls._playwright.stop()
-                except Exception:
-                    pass
-                cls._playwright = None
+            await cls._close_browser_unlocked()
+            gc.collect()
 
     def _get_proxy(self, task: ScrapingTask) -> Optional[Dict[str, str]]:
         """Obtiene y formatea la configuración de proxy si está habilitada."""
@@ -98,13 +126,6 @@ class DynamicParser(BaseParser):
                 user_agent=dynamic_user_agent,
                 viewport={"width": 1280, "height": 720},
                 extra_http_headers={
-                    "Sec-Ch-Ua": f'"Chromium";v="{major_version}", "Google Chrome";v="{major_version}", "Not?A_Brand";v="99"',
-                    "Sec-Ch-Ua-Mobile": "?0",
-                    "Sec-Ch-Ua-Platform": '"Windows"',
-                    "Sec-Fetch-Dest": "document",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-Site": "none",
-                    "Sec-Fetch-User": "?1",
                     "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
                 }
             )
@@ -142,10 +163,15 @@ class DynamicParser(BaseParser):
         if config.click_selectors:
             for selector in config.click_selectors:
                 self.log.info(
-                    f"Interacción: Haciendo click en {selector} | Tarea ID: {task.task_id}"
+                    f"Interacción: Intentando click en {selector} | Tarea ID: {task.task_id}"
                 )
-                await page.click(selector)
-                await asyncio.sleep(0.5)
+                try:
+                    await page.click(selector, timeout=5000)
+                    await asyncio.sleep(0.5)
+                except Exception as ce:
+                    self.log.warning(
+                        f"Interacción opcional click en {selector} omita/no presente: {str(ce)}"
+                    )
 
         if config.scroll_to_bottom:
             self.log.info(
@@ -160,7 +186,7 @@ class DynamicParser(BaseParser):
             self.log.info(
                 f"Espera: Esperando el selector {config.wait_for_selector} | Tarea ID: {task.task_id}"
             )
-            await page.wait_for_selector(config.wait_for_selector, timeout=config.timeout_ms)
+            await page.wait_for_selector(config.wait_for_selector, timeout=config.timeout_ms, state="attached")
 
         if config.fixed_sleep_s and config.fixed_sleep_s > 0:
             self.log.info(
@@ -170,7 +196,7 @@ class DynamicParser(BaseParser):
 
         if config.container and not config.wait_for_selector:
             try:
-                await page.wait_for_selector(config.container, timeout=config.timeout_ms)
+                await page.wait_for_selector(config.container, timeout=config.timeout_ms, state="attached")
             except Exception:
                 pass
 
@@ -187,19 +213,27 @@ class DynamicParser(BaseParser):
             container=config.container
         )
 
-        if not extracted:
+        if not extracted or (isinstance(extracted, list) and all(all(not v for v in item.values()) for item in extracted)):
+            title_text = soup.title.string if soup.title else "Sin Título"
+            body_preview = soup.get_text(" ", strip=True)[:300]
+            self.log.error(
+                f"Extracción fallida en tarea {task.task_id} | Título DOM: '{title_text}' | Vista previa HTML: '{body_preview}'"
+            )
             raise ScrapingError(
                 ErrorCategory.INVALID_SCHEMA,
-                "Selectores no extrajeron datos (posible cambio de DOM o carga fallida)",
+                f"Selectores no extrajeron datos (DOM: '{title_text}')",
                 task.task_id
             )
-        elif isinstance(extracted, dict):
-            if all(not v for v in extracted.values()):
-                raise ScrapingError(
-                    ErrorCategory.INVALID_SCHEMA,
-                    "Selectores no extrajeron datos (posible cambio de DOM o carga fallida)",
-                    task.task_id
-                )
+        elif isinstance(extracted, dict) and all(not v for v in extracted.values()):
+            title_text = soup.title.string if soup.title else "Sin Título"
+            self.log.error(
+                f"Extracción fallida entidad única en tarea {task.task_id} | Título DOM: '{title_text}'"
+            )
+            raise ScrapingError(
+                ErrorCategory.INVALID_SCHEMA,
+                f"Selectores no extrajeron datos (DOM: '{title_text}')",
+                task.task_id
+            )
 
         return extracted
 
@@ -207,8 +241,10 @@ class DynamicParser(BaseParser):
         """Parser asíncrono para renderizado de JS dinámico mediante Playwright."""
         config = PlaywrightConfig(**(task.parser_config or {}))
         context = None
+        page = None
 
         try:
+            DynamicParser._tasks_processed_count += 1
             context = await self._init_browser_context(task, config)
             page = await context.new_page()
 
@@ -251,7 +287,16 @@ class DynamicParser(BaseParser):
                 original_error=str(e)
             )
         finally:
+            if page:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
             if context:
-                await context.close()
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+            gc.collect()
 
         return self._prepare_result(task, extracted)
