@@ -234,7 +234,7 @@ class WorkerController:
             # Un timeout requiere un backoff corto
             delay = 5 * task.retry_count
             log.warning(
-                f"Timeout en tarea {task.task_id}. Reintento {task.context['_current_retries']} en {delay}s.")
+                f"Timeout en tarea {task.task_id}. Reintento {task.retry_count} en {delay}s.")
 
         elif category == ErrorCategory.BLOCKED:
             # Un bloqueo antibot requiere enfriar la IP / rotar proxy. Backoff agresivo + Jitter

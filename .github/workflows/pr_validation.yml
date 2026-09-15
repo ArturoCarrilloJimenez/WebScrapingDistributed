@@ -58,7 +58,7 @@ jobs:
 
   sonar:
     name: SonarCloud Analysis
-    needs: test # ESTO ES CRUCIAL
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -99,4 +99,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          
+
+  docker:
+    name: Build & Push Docker Images
+    needs: sonar
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [producer, worker]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Iniciar sesión en Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Preparar nombre de la imagen (convertir a minúsculas)
+        id: prep
+        run: |
+          DOCKER_USER=$(echo "${{ secrets.DOCKERHUB_USERNAME }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_NAME=${DOCKER_USER}/web-scraping-${{ matrix.service }}" >> $GITHUB_OUTPUT
+
+      - name: Extraer metadatos (tags y etiquetas)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.prep.outputs.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Compilar y publicar imagen en Docker Hub
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

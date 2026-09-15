@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     proxy_max_requests_per_session: int = 100
     proxy_min_requests_per_session: int = 10
 
+    # Configuración de renderizado dinámico Playwright & Gestión de recursos
+    playwright_max_tasks_per_browser: int = 25  # Recicla Chromium cada N tareas para liberar V8 Heap / RAM
+    playwright_v8_max_old_space_size_mb: int = 512  # Límite máximo de Heap JS por pestaña Chromium en MB
+
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(
         env_file=".env",

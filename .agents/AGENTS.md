@@ -18,12 +18,16 @@ To preserve context, avoid common pitfalls, and align with the developer's knowl
 4. **Inspect the Knowledge Graph (Knowledge Base):** Check notes in `AI_Brain/04_Knowledge_Base/` to align with the core system concepts and troubleshooting logs:
    * `AI_Brain/04_Knowledge_Base/troubleshooting.md` — Read to understand common DNS, network resolution, Docker, and Floci setup errors.
    * `AI_Brain/04_Knowledge_Base/well_architected/` — Review the structural pillars of AWS Well-Architected Framework applied to this scraper (especially `reliability.md` and standard concepts under `concepts/` such as SQS resilience or S3 storage optimization).
-5. **Acknowledge Current State:** In the first response to the user, briefly acknowledge the latest session state and any key constraints retrieved from both the project memory and the Knowledge Graph to confirm synchronization.
+5. **Leverage Graphify AST Code Graph:** Query the `graphify` MCP server (`graphify_query`, `graphify_get_subgraph`, `graphify_get_node`) or inspect `AI_Brain/06_Code_Graph/WebScrapingDistributed/` notes to resolve complex symbol relationships, caller-callee chains, and class hierarchies before modifying code.
+6. **Acknowledge Current State:** In the first response to the user, briefly acknowledge the latest session state and any key constraints retrieved from both the project memory and the Knowledge Graph to confirm synchronization.
 
 ### 🔄 Telemetry & Logging Updates
 Upon completing tasks, implementing new features, or resolving bugs, the agent **MUST** update the Obsidian Vault:
 * **Log the Session:** Append details of the current development actions to `AI_Brain/03_Telemetry_Logs/engineering_diary.md` (or the specific session file in `session_logs/`).
 * **Update the Backlog:** Move completed tasks to `✅ Done` and update the status of in-progress tasks in `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md`.
+* **Refresh Graphify Code Graph:** When code files (`producer/`, `worker/`, `jobs/`, `shared/`) are created or refactored, run incremental Graphify extraction & Obsidian export to sync `AI_Brain/06_Code_Graph/WebScrapingDistributed/`:
+  * `uvx --from graphifyy[mcp] graphify extract . --code-only --out "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
+  * `uvx --from graphifyy[mcp] graphify export obsidian --graph "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed\graphify-out\graph.json" --dir "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
 * **Update Configuration/Architecture/Knowledge:** If new environment variables are added, connections change, or new architectural constraints are resolved, update `environment_variables.md`, `connection_map.md`, or create a corresponding concept/troubleshooting note in `AI_Brain/04_Knowledge_Base/`.
 
 ---
