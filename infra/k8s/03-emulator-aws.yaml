@@ -14,11 +14,19 @@ spec:
       labels:
         app: emulator-aws
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: emulator-aws
           image: floci/floci:latest-compat
           ports:
             - containerPort: 4566
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           env:
             - name: DEFAULT_REGION
               valueFrom:
