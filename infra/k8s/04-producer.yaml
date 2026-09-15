@@ -1,0 +1,61 @@
+# 1. Deployment para la API Producer (FastAPI Ingestion API)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: web-scraping-distributed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+  template:
+    metadata:
+      labels:
+        app: producer
+    spec:
+      containers:
+        - name: producer
+          image: worker/Dockerfile
+          ports:
+            - containerPort: # TODO: Puerto interno del FastAPI (8000)
+          envFrom:
+            - configMapRef:
+                name: scraping-config
+          env:
+            # TODO: Añadir SQS_ENDPOINT_URL desde scraping-secrets
+            # TODO: Añadir SQS_QUEUE_URL mapeada a SQS_QUEUE_URL_STATIC desde scraping-secrets
+            # TODO: Añadir SQS_QUEUE_URL_DYNAMIC desde scraping-secrets
+            # TODO: Añadir AWS_ACCESS_KEY_ID desde scraping-secrets
+            # TODO: Añadir AWS_SECRET_ACCESS_KEY desde scraping-secrets
+          
+          # Health Checks (Sección 15 del curso)
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+
+---
+
+# 2. Service para exponer la API Producer a través de un puerto de nodo (NodePort)
+apiVersion: v1
+kind: Service
+metadata:
+  name: producer-service
+  namespace: web-scraping-distributed
+spec:
+  type: NodePort
+  selector:
+    app: producer
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: # TODO: Asignar un puerto de nodo entre 30000 y 32767 (ej: 30800)

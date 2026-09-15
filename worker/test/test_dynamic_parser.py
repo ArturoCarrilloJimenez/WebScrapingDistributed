@@ -112,7 +112,7 @@ async def test_dynamic_parser_interactions_and_waits():
     mock_page.evaluate.assert_called_once_with("window.scrollTo(0, document.body.scrollHeight)")
 
     await parser._wait_for_conditions(mock_page, task, config)
-    mock_page.wait_for_selector.assert_called_with("h1.title", timeout=config.timeout_ms)
+    mock_page.wait_for_selector.assert_called_with("h1.title", timeout=config.timeout_ms, state="attached")
 
 
 async def test_dynamic_parser_get_proxy():

@@ -1,0 +1,60 @@
+# 1. Deployment para el Emulador de AWS (Floci/LocalStack)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: emulator-aws
+  namespace: web-scraping-distributed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: emulator-aws
+  template:
+    metadata:
+      labels:
+        app: emulator-aws
+    spec:
+      containers:
+        - name: emulator-aws
+          image: floci/floci:latest-compat
+          ports:
+            - containerPort: 4566
+          env:
+            - name: DEFAULT_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: scraping-config
+                  key: DEFAULT_REGION_AWS
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: DEBUG
+              value: "1"
+            - name: DOCKER_HOST
+              value: "unix:///var/run/docker.sock"
+            - name: FLOCI_STORAGE_MODE
+              value: "hybrid"
+
+---
+
+# 2. Service para conectar internamente con el emulador mediante DNS
+apiVersion: v1
+kind: Service
+metadata:
+  name: emulator-aws # <--- Nombre de DNS interno en K8s
+  namespace: web-scraping-distributed
+spec:
+  type: NodePort
+  selector:
+    app: emulator-aws
+  ports:
+    - port: 4566
+      targetPort: 4566
+      nodePort: 31000
