@@ -117,7 +117,6 @@ class DynamicParser(BaseParser):
         browser = await self.get_browser()
 
         browser_version = browser.version
-        major_version = browser_version.split(".")[0] if browser_version else "130"
         dynamic_user_agent = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser_version} Safari/537.36"
 
         try:

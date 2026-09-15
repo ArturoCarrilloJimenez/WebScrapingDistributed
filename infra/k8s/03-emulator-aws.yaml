@@ -24,9 +24,11 @@ spec:
             requests:
               memory: "256Mi"
               cpu: "100m"
+              ephemeral-storage: "500Mi"
             limits:
               memory: "512Mi"
               cpu: "500m"
+              ephemeral-storage: "2Gi"
           env:
             - name: DEFAULT_REGION
               valueFrom:
