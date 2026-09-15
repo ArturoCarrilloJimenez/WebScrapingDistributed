@@ -99,3 +99,27 @@ def test_extract_with_honeypot_guard():
 
     assert result["text"] == ["Visible"]
     assert mock_guard.filter_static_elements.called
+
+
+def test_extract_self_selector_and_container_honeypot():
+    """Valida el selector 'self' y el filtrado de honeypot en contenedores."""
+    mock_guard = MagicMock()
+    mock_guard.filter_static_elements.side_effect = lambda els: [e for e in els if "trap" not in e.get("class", [])]
+
+    extractor = UniversalDOMExtractor(honeypot_guard=mock_guard)
+    html = """
+    <div>
+        <div class="item">Texto A</div>
+        <div class="item trap">Trap B</div>
+    </div>
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Prueba container con honeypot guard
+    res = extractor.extract_from_soup(soup, {"text": "self"}, container=".item")
+    assert len(res) == 1
+    assert res[0]["text"] == "Texto A"
+
+    # Prueba self selector en BeautifulSoup raíz
+    res_root = extractor._select_and_filter_elements(soup, "self")
+    assert len(res_root) == 1

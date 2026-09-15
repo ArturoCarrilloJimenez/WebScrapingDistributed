@@ -1,11 +1,23 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, Error as PlaywrightError
 from scraping.parsers.dinamic_parse import DynamicParser
 from shared.models import ScrapingTask
 from scraping.exceptions import ScrapingError, ErrorCategory
 from shared.models.parse_config.dynamic_playwright import Config as PlaywrightConfig
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture(autouse=True)
+def reset_dynamic_parser_state():
+    DynamicParser._browser = None
+    DynamicParser._playwright = None
+    DynamicParser._tasks_processed_count = 0
+    yield
+    DynamicParser._browser = None
+    DynamicParser._playwright = None
+    DynamicParser._tasks_processed_count = 0
 
 
 def _create_mock_browser(html_content: str, status_code: int = 200):
@@ -49,8 +61,9 @@ async def test_dynamic_parser_success():
         mock_get_browser.return_value = mock_browser
         mock_stealth.return_value.apply_stealth_async = AsyncMock()
 
-        res = await parser.parse(task)
-        assert res.data["headline"] == ["Noticia Dinamica"]
+        result = await parser.parse(task)
+        assert result.data["headline"] == ["Noticia Dinamica"]
+        assert parser._tasks_processed_count == 1
 
 
 async def test_dynamic_parser_invalid_schema():
@@ -162,3 +175,77 @@ async def test_dynamic_parser_blocked_status():
         with pytest.raises(ScrapingError) as exc_info:
             await parser.parse(task)
         assert exc_info.value.category == ErrorCategory.BLOCKED
+
+
+async def test_dynamic_parser_browser_recycling_and_close():
+    """Valida el cierre y reciclado del navegador Chromium."""
+    mock_browser = AsyncMock()
+    mock_playwright = AsyncMock()
+
+    DynamicParser._browser = mock_browser
+    DynamicParser._playwright = mock_playwright
+    DynamicParser._tasks_processed_count = 100  # Supera límite
+
+    with patch("scraping.parsers.dinamic_parse.async_playwright") as mock_async_pw:
+        mock_pw_builder = AsyncMock()
+        mock_pw_builder.chromium.launch = AsyncMock(return_value=_create_mock_browser("<html></html>"))
+        mock_async_pw.return_value.start = AsyncMock(return_value=mock_pw_builder)
+
+        browser = await DynamicParser.get_browser()
+        assert DynamicParser._tasks_processed_count == 0
+
+    await DynamicParser.close_browser()
+    assert DynamicParser._browser is None
+    assert DynamicParser._playwright is None
+
+
+async def test_dynamic_parser_playwright_exceptions():
+    """Valida el manejo de PlaywrightTimeoutError y PlaywrightError."""
+    mock_client = MagicMock()
+    parser = DynamicParser(network_client=mock_client)
+
+    task = ScrapingTask(
+        job_id="j_01", batch_id="b_01", task_id="t_05",
+        url="http://example.com/timeout",
+        parser_type="dynamic_playwright",
+        parser_config={"selectors": {"title": "h1"}}
+    )
+
+    with patch.object(DynamicParser, "_init_browser_context", side_effect=PlaywrightTimeoutError("Timeout error")):
+        with pytest.raises(ScrapingError) as exc_info:
+            await parser.parse(task)
+        assert exc_info.value.category == ErrorCategory.TIMEOUT
+
+    with patch.object(DynamicParser, "_init_browser_context", side_effect=PlaywrightError("Blocked by firewall")):
+        with pytest.raises(ScrapingError) as exc_info:
+            await parser.parse(task)
+        assert exc_info.value.category == ErrorCategory.BLOCKED
+
+    with patch.object(DynamicParser, "_init_browser_context", side_effect=Exception("Unknown error")):
+        with pytest.raises(ScrapingError) as exc_info:
+            await parser.parse(task)
+        assert exc_info.value.category == ErrorCategory.SERVER_ERROR
+
+
+async def test_dynamic_parser_empty_list_extraction():
+    """Valida el error de INVALID_SCHEMA cuando la extracción de contenedor devuelve diccionarios vacíos."""
+    mock_client = MagicMock()
+    mock_client.proxy_provider = None
+    parser = DynamicParser(network_client=mock_client)
+
+    mock_browser = _create_mock_browser("<html><head><title>Test</title></head><body><div class='item'></div></body></html>")
+    task = ScrapingTask(
+        job_id="j_01", batch_id="b_01", task_id="t_06",
+        url="http://example.com/empty-list",
+        parser_type="dynamic_playwright",
+        parser_config={"selectors": {"title": ".missing"}, "container": ".item"}
+    )
+
+    with patch.object(DynamicParser, "get_browser", new_callable=AsyncMock) as mock_get_browser, \
+         patch("scraping.parsers.dinamic_parse.Stealth") as mock_stealth:
+        mock_get_browser.return_value = mock_browser
+        mock_stealth.return_value.apply_stealth_async = AsyncMock()
+
+        with pytest.raises(ScrapingError) as exc_info:
+            await parser.parse(task)
+        assert exc_info.value.category == ErrorCategory.INVALID_SCHEMA
