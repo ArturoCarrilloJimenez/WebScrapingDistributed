@@ -177,14 +177,14 @@ async def test_dynamic_parser_blocked_status():
         assert exc_info.value.category == ErrorCategory.BLOCKED
 
 
-async def test_dynamic_parser_browser_recycling_and_close():
+async def test_dynamic_parser_browser_recycling_and_close(monkeypatch):
     """Valida el cierre y reciclado del navegador Chromium."""
     mock_browser = AsyncMock()
     mock_playwright = AsyncMock()
 
-    DynamicParser._browser = mock_browser
-    DynamicParser._playwright = mock_playwright
-    DynamicParser._tasks_processed_count = 100  # Supera límite
+    monkeypatch.setattr(DynamicParser, "_browser", mock_browser)
+    monkeypatch.setattr(DynamicParser, "_playwright", mock_playwright)
+    monkeypatch.setattr(DynamicParser, "_tasks_processed_count", 100)
 
     with patch("scraping.parsers.dinamic_parse.async_playwright") as mock_async_pw:
         mock_pw_builder = AsyncMock()
