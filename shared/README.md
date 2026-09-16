@@ -101,7 +101,7 @@ class FieldSpec(BaseModel):
     default: Optional[Any] = None
     multiple: bool = False           # Retorna lista si es True dentro de un contenedor
 
-FieldDefinition = Union[str, FieldSpec]
+FieldDefinition = str | FieldSpec
 ```
 * **`static_css.py`**:
 ```python

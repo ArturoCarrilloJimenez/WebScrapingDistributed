@@ -56,8 +56,8 @@ done
 
 # 4. Crear el Bucket S3 para elData Lake
 # Mapeado directamente con settings.s3_bucket_name
-awslocal s3 mb s3://scraping-raw-data || true
+awslocal s3 mb s3://scraping-data-lake || true
 
-echo "S3 Bucket 'scraping-raw-data' created successfully."
+echo "S3 Bucket 'scraping-data-lake' created successfully."
 
 echo "----------- Infrastructure Ready -----------"

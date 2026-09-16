@@ -16,3 +16,9 @@ test-results.xml
 *.xml
 .coverage
 02-secret.yaml
+.terraform
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+graphify-out
+*/.coverage
