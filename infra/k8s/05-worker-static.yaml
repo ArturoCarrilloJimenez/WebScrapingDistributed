@@ -1,38 +1,39 @@
-# 1. Deployment para la API Producer (FastAPI Ingestion API)
+# Deployment para los Workers Estáticos (HTML + CSS / BeautifulSoup)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: producer
+  name: worker-static
   namespace: web-scraping-distributed
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: producer
+      app: worker-static
   template:
     metadata:
       labels:
-        app: producer
+        app: worker-static
     spec:
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       containers:
-        - name: producer
-          image: arturocarrillojimenez/web-scraping-producer:latest
-          ports:
-            - containerPort: 8000
+        - name: worker-static
+          image: arturocarrillojimenez/web-scraping-worker:latest
           resources:
             requests:
               cpu: "100m"
               memory: "128Mi"
               ephemeral-storage: "50Mi"
             limits:
-              cpu: "500m"
+              cpu: "300m"
               memory: "256Mi"
               ephemeral-storage: "200Mi"
           envFrom:
             - configMapRef:
                 name: scraping-config
           env:
+            - name: PARSER_TYPE
+              value: "static_css"
             - name: SQS_ENDPOINT_URL
               valueFrom:
                 secretKeyRef:
@@ -43,11 +44,6 @@ spec:
                 secretKeyRef:
                   name: scraping-secrets
                   key: SQS_QUEUE_URL_STATIC
-            - name: SQS_QUEUE_URL_DYNAMIC
-              valueFrom:
-                secretKeyRef:
-                  name: scraping-secrets
-                  key: SQS_QUEUE_URL_DYNAMIC
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
@@ -58,38 +54,18 @@ spec:
                 secretKeyRef:
                   name: scraping-secrets
                   key: AWS_SECRET_ACCESS_KEY
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: S3_ENDPOINT_URL
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: S3_BUCKET_NAME
             - name: DEFAULT_REGION_AWS
               valueFrom:
                 secretKeyRef:
                   name: scraping-secrets
                   key: DEFAULT_REGION_AWS
-          # Health Checks
-          readinessProbe:
-            httpGet:
-              path: /docs
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /docs
-              port: 8000
-            initialDelaySeconds: 10
-            periodSeconds: 15
-
----
-
-# 2. Service para exponer la API Producer a través de un puerto de nodo (NodePort)
-apiVersion: v1
-kind: Service
-metadata:
-  name: producer-service
-  namespace: web-scraping-distributed
-spec:
-  type: NodePort
-  selector:
-    app: producer
-  ports:
-    - port: 8000
-      targetPort: 8000
-      nodePort: 30800

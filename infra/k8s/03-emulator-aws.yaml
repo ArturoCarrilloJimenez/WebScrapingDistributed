@@ -32,8 +32,8 @@ spec:
           env:
             - name: DEFAULT_REGION
               valueFrom:
-                configMapKeyRef:
-                  name: scraping-config
+                secretKeyRef:
+                  name: scraping-secrets
                   key: DEFAULT_REGION_AWS
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -58,7 +58,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: emulator-aws # <--- Nombre de DNS interno en K8s
+  name: emulator-aws
   namespace: web-scraping-distributed
 spec:
   type: NodePort

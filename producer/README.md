@@ -2,6 +2,8 @@
 
 Microservicio de alto rendimiento desarrollado con **FastAPI** diseñado exclusivamente para recibir solicitudes masivas de scraping, validarlas rigurosamente en tiempo real contra contratos de datos estructurados y despacharlas de forma asíncrona hacia SQS, maximizando la concurrencia y minimizando la latencia de respuesta al cliente.
 
+> 📖 **Guía Completa de Uso de la API:** Consulta el [Manual Detallado de Uso de la API Producer](API_USAGE_GUIDE.md) para ejemplos paso a paso, contratos `FieldSpec`, contenedores `container` y opciones dinámicas de Playwright.
+
 ---
 
 ## 📌 Arquitectura y Patrones de Diseño

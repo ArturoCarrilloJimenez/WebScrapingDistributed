@@ -78,6 +78,8 @@ graph TD
 
 El **Producer** es una API de alto rendimiento desarrollada con **FastAPI**. Recibe lotes de tareas de scraping, valida las cargas útiles contra modelos Pydantic V2 y las encola en Amazon SQS de forma asíncrona.
 
+> 📖 **Guía Completa de Uso de la API:** Consulta el [Manual Detallado de Uso de la API Producer](producer/API_USAGE_GUIDE.md) para ver ejemplos paso a paso, uso de selectores `FieldSpec`, contenedores de colecciones e interacciones dinámicas con Playwright.
+
 - **Respuesta Asíncrona (`202 Accepted`)**: Libera al cliente inmediatamente (patrón Fire and Forget).
 - **Enrutamiento Dinámico**: Inspecciona el campo `parser_type` de cada tarea y la dirige a la cola correspondiente (`static_css` -> `scraping-tasks-static`, `dynamic_playwright` -> `scraping-tasks-dynamic`).
 - **Batching SQS & Conexión Singleton**: Utiliza `aioboto3` para reutilizar conexiones TLS y despachar tareas en lotes de hasta 10 mensajes (`SendMessageBatch`), maximizando el throughput de red.
