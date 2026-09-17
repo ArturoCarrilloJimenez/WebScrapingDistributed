@@ -32,8 +32,8 @@ spec:
           env:
             - name: DEFAULT_REGION
               valueFrom:
-                configMapKeyRef:
-                  name: scraping-config
+                secretKeyRef:
+                  name: scraping-secrets
                   key: DEFAULT_REGION_AWS
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
@@ -51,6 +51,13 @@ spec:
               value: "unix:///var/run/docker.sock"
             - name: FLOCI_STORAGE_MODE
               value: "hybrid"
+          volumeMounts:
+            - name: floci-storage
+              mountPath: /app/data
+      volumes:
+        - name: floci-storage
+          persistentVolumeClaim:
+            claimName: emulator-aws-pvc
 
 ---
 
@@ -58,7 +65,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: emulator-aws # <--- Nombre de DNS interno en K8s
+  name: emulator-aws
   namespace: web-scraping-distributed
 spec:
   type: NodePort

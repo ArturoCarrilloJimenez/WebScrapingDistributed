@@ -1,0 +1,12 @@
+# PersistentVolumeClaim para la persistencia de datos de Floci (S3 Data Lake + SQS)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: emulator-aws-pvc
+  namespace: web-scraping-distributed
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

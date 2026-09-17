@@ -21,14 +21,23 @@ To preserve context, avoid common pitfalls, and align with the developer's knowl
 5. **Leverage Graphify AST Code Graph:** Query the `graphify` MCP server (`graphify_query`, `graphify_get_subgraph`, `graphify_get_node`) or inspect `AI_Brain/06_Code_Graph/WebScrapingDistributed/` notes to resolve complex symbol relationships, caller-callee chains, and class hierarchies before modifying code.
 6. **Acknowledge Current State:** In the first response to the user, briefly acknowledge the latest session state and any key constraints retrieved from both the project memory and the Knowledge Graph to confirm synchronization.
 
-### 🔄 Telemetry & Logging Updates
-Upon completing tasks, implementing new features, or resolving bugs, the agent **MUST** update the Obsidian Vault:
+### 🔄 Telemetry, Project Memory & Knowledge Base Updates (Mandatory on Every Feature/Change)
+Upon completing tasks, implementing new features, refactoring code, or adding configuration, the agent **MUST** update the Obsidian Vault continuously:
 * **Log the Session:** Append details of the current development actions to `AI_Brain/03_Telemetry_Logs/engineering_diary.md` (or the specific session file in `session_logs/`).
-* **Update the Backlog:** Move completed tasks to `✅ Done` and update the status of in-progress tasks in `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md`.
-* **Refresh Graphify Code Graph:** When code files (`producer/`, `worker/`, `jobs/`, `shared/`) are created or refactored, run incremental Graphify extraction & Obsidian export to sync `AI_Brain/06_Code_Graph/WebScrapingDistributed/`:
+* **Update the Backlog:** Move completed tasks to `✅ Done` and update in-progress task statuses in `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md`.
+* **Sync Project Documentation Notes (`AI_Brain/02_Projects/WebScrapingDistributed/`):** **ALWAYS** keep the core project notes aligned with the current code state without waiting for explicit prompt reminders. Update:
+  * `overview.md`: Tech stack, roadmap, completed milestones.
+  * `architecture.md`: Component diagrams, data flows, new microservices or jobs.
+  * `connection_map.md`: Ports, endpoints, singletons, and NodePort mappings.
+  * `environment_variables.md`: New `.env` variables and settings defaults.
+  * `run_commands.md`: Commands for launching services, tests, IaC (Terraform), K8s, and ETL jobs.
+  * `source_code_index.md`: Directory tree and module responsibilities.
+  * `decisions_log.md`: Add Architecture Decision Records (ADRs) for major design tradeoffs.
+  * `technical_debt.md`: Transition resolved items to completed and update upcoming debt.
+* **Create Knowledge Base Concept Notes:** When new patterns or security/resilience mechanisms are introduced (e.g. S3 compaction, anti-bot evasion, dynamic backoff), create a dedicated markdown note under `AI_Brain/04_Knowledge_Base/`.
+* **Refresh Graphify AST Code Graph:** Whenever code files (`producer/`, `worker/`, `jobs/`, `shared/`) are created or modified, execute incremental Graphify extraction and Obsidian export:
   * `uvx --from graphifyy[mcp] graphify extract . --code-only --out "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
   * `uvx --from graphifyy[mcp] graphify export obsidian --graph "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed\graphify-out\graph.json" --dir "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
-* **Update Configuration/Architecture/Knowledge:** If new environment variables are added, connections change, or new architectural constraints are resolved, update `environment_variables.md`, `connection_map.md`, or create a corresponding concept/troubleshooting note in `AI_Brain/04_Knowledge_Base/`.
 
 ---
 
@@ -107,3 +116,19 @@ Implement system logic following these technical guidelines:
 
 ### B. Small Files Problem Mitigation
 * **Data Compaction:** The Worker writes data in fragmented JSONL format to S3. To prevent performance degradation, the scheduled ETL compactor (`jobs/compact_s3.py`) consolidates these fragments into unified **Parquet** files using **ZSTD** compression. Maintain this compression standard for analytical querying.
+
+---
+
+## 🛑 7. Mandatory Change Approval & Consultation Protocol
+
+The agent **MUST ALWAYS** follow this strict 5-step protocol before making ANY changes or edits to code, configuration, or infrastructure files (no matter how minimal):
+
+1. **Analysis & Technical Proposal**: Analyze the root cause and explain the proposed approach, trade-offs, and design rationale to the user first.
+2. **Debate & User Confirmation**: Wait for the user to review, debate, or explicitly confirm the proposed approach before writing any code.
+3. **Execution**: Apply the code or configuration edits strictly after user alignment.
+4. **Verification & Testing**: Execute tests (`pytest`), builds, or cluster checks to empirically verify the change.
+5. **Summary**: Provide a clear, professional summary of the exact modifications made and verification results.
+
+> [!CAUTION]
+> **Strict Prohibition**: The agent is **PROHIBITED** from modifying application code, infrastructure manifests, or environment configurations without prior explanation and explicit user approval.
+

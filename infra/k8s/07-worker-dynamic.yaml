@@ -1,0 +1,76 @@
+# Deployment para los Workers Dinámicos (Playwright Chromium + Stealth)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-dynamic
+  namespace: web-scraping-distributed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-dynamic
+  template:
+    metadata:
+      labels:
+        app: worker-dynamic
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: worker-dynamic
+          image: arturocarrillojimenez/web-scraping-worker:latest
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+              ephemeral-storage: "100Mi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+              ephemeral-storage: "500Mi"
+          envFrom:
+            - configMapRef:
+                name: scraping-config
+          env:
+            - name: WORKER_NUM_MAX_CONCURRENT_TASKS
+              valueFrom:
+                configMapKeyRef:
+                  name: scraping-config
+                  key: WORKER_NUM_MAX_CONCURRENT_TASKS_DYNAMIC
+            - name: PARSER_TYPE
+              value: "dynamic_playwright"
+            - name: SQS_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: SQS_ENDPOINT_URL
+            - name: SQS_QUEUE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: SQS_QUEUE_URL_DYNAMIC
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: S3_ENDPOINT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: S3_ENDPOINT_URL
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: S3_BUCKET_NAME
+            - name: DEFAULT_REGION_AWS
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: DEFAULT_REGION_AWS
