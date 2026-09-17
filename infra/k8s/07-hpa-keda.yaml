@@ -1,0 +1,68 @@
+# 1. Autenticación de KEDA con AWS / Floci usando el Secret del namespace
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-aws-credentials
+  namespace: web-scraping-distributed
+spec:
+  secretTargetRef:
+    - parameter: awsAccessKeyId
+      name: scraping-secrets
+      key: AWS_ACCESS_KEY_ID
+    - parameter: awsSecretAccessKey
+      name: scraping-secrets
+      key: AWS_SECRET_ACCESS_KEY
+
+---
+
+# 2. Regla de Escalado Elástico para Workers Estáticos (worker-static)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-static-scaler
+  namespace: web-scraping-distributed
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker-static
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  cooldownPeriod: 30
+  pollingInterval: 15
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-credentials
+      metadata:
+        awsEndpoint: "http://emulator-aws.web-scraping-distributed.svc.cluster.local:4566"
+        queueURLFromEnv: SQS_QUEUE_URL
+        queueLength: "45"
+        awsRegion: "us-east-1"
+
+---
+
+# 3. Regla de Escalado Elástico para Workers Dinámicos (worker-dynamic)
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-dynamic-scaler
+  namespace: web-scraping-distributed
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker-dynamic
+  minReplicaCount: 0
+  maxReplicaCount: 4
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-credentials
+      metadata:
+        awsEndpoint: "http://emulator-aws.web-scraping-distributed.svc.cluster.local:4566"
+        queueURLFromEnv: SQS_QUEUE_URL
+        queueLength: "5"
+        awsRegion: "us-east-1"

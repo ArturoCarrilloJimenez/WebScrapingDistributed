@@ -32,6 +32,11 @@ spec:
             - configMapRef:
                 name: scraping-config
           env:
+            - name: WORKER_NUM_MAX_CONCURRENT_TASKS
+              valueFrom:
+                configMapKeyRef:
+                  name: scraping-config
+                  key: WORKER_NUM_MAX_CONCURRENT_TASKS_DYNAMIC
             - name: PARSER_TYPE
               value: "dynamic_playwright"
             - name: SQS_ENDPOINT_URL
