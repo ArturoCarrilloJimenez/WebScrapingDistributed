@@ -66,6 +66,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up JDK 21 for SonarScanner
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
           
       # Descarga el reporte de producer directamente en la carpeta 'producer/'
       - name: Download Producer Reports
