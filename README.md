@@ -297,10 +297,12 @@ Para aplicar los manifiestos en tu clúster de Kubernetes local (Docker Desktop 
 kubectl apply -f infra/k8s/00-namespace.yaml
 kubectl apply -f infra/k8s/01-config-map.yml
 kubectl apply -f infra/k8s/02-secret.yaml
-kubectl apply -f infra/k8s/03-emulator-aws.yaml
-kubectl apply -f infra/k8s/04-producer.yaml
-kubectl apply -f infra/k8s/05-worker-static.yaml
-kubectl apply -f infra/k8s/06-worker-dynamic.yaml
+kubectl apply -f infra/k8s/03-pvc-emulator.yaml
+kubectl apply -f infra/k8s/04-emulator-aws.yaml
+kubectl apply -f infra/k8s/05-producer.yaml
+kubectl apply -f infra/k8s/06-worker-static.yaml
+kubectl apply -f infra/k8s/07-worker-dynamic.yaml
+kubectl apply -f infra/k8s/08-hpa-keda.yaml
 ```
 
 ---

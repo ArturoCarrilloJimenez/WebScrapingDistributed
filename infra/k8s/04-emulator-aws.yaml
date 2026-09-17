@@ -51,6 +51,13 @@ spec:
               value: "unix:///var/run/docker.sock"
             - name: FLOCI_STORAGE_MODE
               value: "hybrid"
+          volumeMounts:
+            - name: floci-storage
+              mountPath: /app/data
+      volumes:
+        - name: floci-storage
+          persistentVolumeClaim:
+            claimName: emulator-aws-pvc
 
 ---
 

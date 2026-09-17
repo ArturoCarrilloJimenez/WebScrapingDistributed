@@ -116,3 +116,19 @@ Implement system logic following these technical guidelines:
 
 ### B. Small Files Problem Mitigation
 * **Data Compaction:** The Worker writes data in fragmented JSONL format to S3. To prevent performance degradation, the scheduled ETL compactor (`jobs/compact_s3.py`) consolidates these fragments into unified **Parquet** files using **ZSTD** compression. Maintain this compression standard for analytical querying.
+
+---
+
+## 🛑 7. Mandatory Change Approval & Consultation Protocol
+
+The agent **MUST ALWAYS** follow this strict 5-step protocol before making ANY changes or edits to code, configuration, or infrastructure files (no matter how minimal):
+
+1. **Analysis & Technical Proposal**: Analyze the root cause and explain the proposed approach, trade-offs, and design rationale to the user first.
+2. **Debate & User Confirmation**: Wait for the user to review, debate, or explicitly confirm the proposed approach before writing any code.
+3. **Execution**: Apply the code or configuration edits strictly after user alignment.
+4. **Verification & Testing**: Execute tests (`pytest`), builds, or cluster checks to empirically verify the change.
+5. **Summary**: Provide a clear, professional summary of the exact modifications made and verification results.
+
+> [!CAUTION]
+> **Strict Prohibition**: The agent is **PROHIBITED** from modifying application code, infrastructure manifests, or environment configurations without prior explanation and explicit user approval.
+
