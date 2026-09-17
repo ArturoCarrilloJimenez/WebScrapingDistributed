@@ -29,6 +29,26 @@ moved {
   to   = aws_s3_bucket.scraping_data_lake
 }
 
+moved {
+  from = aws_sqs_queue.scraping-tasks-dlq-static
+  to   = aws_sqs_queue.scraping_tasks_dlq_static
+}
+
+moved {
+  from = aws_sqs_queue.scraping-tasks-static
+  to   = aws_sqs_queue.scraping_tasks_static
+}
+
+moved {
+  from = aws_sqs_queue.scraping-tasks-dlq-dynamic
+  to   = aws_sqs_queue.scraping_tasks_dlq_dynamic
+}
+
+moved {
+  from = aws_sqs_queue.scraping-tasks-dynamic
+  to   = aws_sqs_queue.scraping_tasks_dynamic
+}
+
 # --- Data Lake Principal ---
 resource "aws_s3_bucket" "scraping_data_lake" {
   bucket = "scraping-data-lake"
@@ -132,6 +152,22 @@ resource "aws_s3_bucket_versioning" "scraping_data_lake_logs" {
   }
 }
 
+# Permisos de entrega de logs para el bucket receptor (AWS log-delivery-write)
+resource "aws_s3_bucket_ownership_controls" "scraping_data_lake_logs" {
+  bucket = aws_s3_bucket.scraping_data_lake_logs.id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_acl" "scraping_data_lake_logs" {
+  depends_on = [aws_s3_bucket_ownership_controls.scraping_data_lake_logs]
+
+  bucket = aws_s3_bucket.scraping_data_lake_logs.id
+  acl    = "log-delivery-write"
+}
+
 # Política de obligatoriedad de acceso por HTTPS para Bucket de Logs
 resource "aws_s3_bucket_policy" "scraping_data_lake_logs" {
   count  = var.is_local ? 0 : 1
@@ -187,41 +223,41 @@ resource "aws_s3_bucket_lifecycle_configuration" "scraping_data_lake_logs" {
 }
 
 # --- Colas SQS Estáticas & DLQ ---
-resource "aws_sqs_queue" "scraping-tasks-dlq-static" {
+resource "aws_sqs_queue" "scraping_tasks_dlq_static" {
   name                      = "scraping-tasks-dlq-static"
   receive_wait_time_seconds = 20
   message_retention_seconds = 1209600 # 14 días
   sqs_managed_sse_enabled   = true
 }
 
-resource "aws_sqs_queue" "scraping-tasks-static" {
+resource "aws_sqs_queue" "scraping_tasks_static" {
   name                       = "scraping-tasks-static"
   visibility_timeout_seconds = 300
   receive_wait_time_seconds  = 20
   sqs_managed_sse_enabled    = true
 
   redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.scraping-tasks-dlq-static.arn
+    deadLetterTargetArn = aws_sqs_queue.scraping_tasks_dlq_static.arn
     maxReceiveCount     = 10
   })
 }
 
 # --- Colas SQS Dinámicas (Playwright) & DLQ ---
-resource "aws_sqs_queue" "scraping-tasks-dlq-dynamic" {
+resource "aws_sqs_queue" "scraping_tasks_dlq_dynamic" {
   name                      = "scraping-tasks-dlq-dynamic"
   receive_wait_time_seconds = 20
   message_retention_seconds = 1209600 # 14 días
   sqs_managed_sse_enabled   = true
 }
 
-resource "aws_sqs_queue" "scraping-tasks-dynamic" {
+resource "aws_sqs_queue" "scraping_tasks_dynamic" {
   name                       = "scraping-tasks-dynamic"
   visibility_timeout_seconds = 900
   receive_wait_time_seconds  = 20
   sqs_managed_sse_enabled    = true
 
   redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.scraping-tasks-dlq-dynamic.arn
+    deadLetterTargetArn = aws_sqs_queue.scraping_tasks_dlq_dynamic.arn
     maxReceiveCount     = 10
   })
 }
