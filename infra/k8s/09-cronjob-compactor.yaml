@@ -27,7 +27,8 @@ spec:
           containers:
             - name: compactor
               image: arturocarrillojimenez/web-scraping-jobs:latest
-              command: ["python", "compact_s3.py"]
+              imagePullPolicy: IfNotPresent
+              command: ["/app/.venv/bin/python", "compact_s3.py"]
               resources:
                 requests:
                   cpu: "100m"

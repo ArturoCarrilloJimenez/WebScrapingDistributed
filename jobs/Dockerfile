@@ -43,8 +43,9 @@ RUN groupadd --system appgroup && useradd --system -g appgroup appuser \
 
 USER appuser
 
-# Enlace de arquitectura: Permite localizar las librerías shared y jobs
-ENV PYTHONPATH="/app/shared:/app/jobs"
+# Enlace de arquitectura: Permite localizar el entorno virtual y las librerías shared y jobs
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/shared:/app/jobs"
 
 WORKDIR /app/jobs
 
