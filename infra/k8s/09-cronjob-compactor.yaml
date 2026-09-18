@@ -26,17 +26,17 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: compactor
-              image: arturocarrillojimenez/web-scraping-worker:latest
-              command: ["python", "jobs/compact_s3.py"]
+              image: arturocarrillojimenez/web-scraping-jobs:latest
+              command: ["python", "compact_s3.py"]
               resources:
                 requests:
-                  cpu: "150m"
-                  memory: "256Mi"
+                  cpu: "100m"
+                  memory: "128Mi"
                   ephemeral-storage: "100Mi"
                 limits:
-                  cpu: "500m"
-                  memory: "512Mi"
-                  ephemeral-storage: "500Mi"
+                  cpu: "400m"
+                  memory: "256Mi"
+                  ephemeral-storage: "300Mi"
               envFrom:
                 - configMapRef:
                     name: scraping-config
