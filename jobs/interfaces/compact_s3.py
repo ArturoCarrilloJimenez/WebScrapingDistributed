@@ -11,6 +11,7 @@ class S3BatchFile(BaseModel):
     key: str
     size: int
     last_modified: datetime.datetime
+    is_compacted: bool = False
 
 
 class ListOfJobs(BaseModel):

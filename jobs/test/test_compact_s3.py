@@ -251,36 +251,28 @@ async def test_main_flow(s3_mock):
     assert "Contents" in resp_raw
 
 
-async def test_is_job_already_compacted(s3_mock):
+async def test_is_batch_compacted_and_tagging(s3_mock):
     now = datetime.datetime.now(datetime.timezone.utc)
-    batches = [
-        S3BatchFile(key="raw-data/job_id=job-check/p1.jsonl", size=10, last_modified=now)
-    ]
-    job = ListOfJobs(
-        prefix="raw-data/job_id=job-check/",
-        batches=batches,
-        total_bytes=10,
-        total_tasks=1,
-        last_modified=now,
-        inactive_time=datetime.timedelta(hours=1)
+    s3_mock.put_object(
+        Bucket="test-bucket",
+        Key="raw-data/job_id=job-check/p1.jsonl",
+        Body=b"raw-content"
     )
+    batch = S3BatchFile(key="raw-data/job_id=job-check/p1.jsonl", size=11, last_modified=now)
 
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        # Before compaction: should return False
-        already_compacted_before = await compact_s3._is_job_already_compacted(client, job)
-        assert already_compacted_before is False
+        # Before tagging: should return False
+        is_compacted_before = await compact_s3._is_batch_compacted(client, batch.key)
+        assert is_compacted_before is False
 
-        # Simulate compacted parquet file in S3
-        s3_mock.put_object(
-            Bucket="test-bucket",
-            Key="compacted-data/job_id=job-check/part-0000.parquet",
-            Body=b"PAR1"
-        )
+        # Tag batch as compacted
+        await compact_s3.tag_batches_as_compacted(client, [batch])
 
-        # After compaction: should return True
-        already_compacted_after = await compact_s3._is_job_already_compacted(client, job)
-        assert already_compacted_after is True
+        # After tagging: should return True
+        is_compacted_after = await compact_s3._is_batch_compacted(client, batch.key)
+        assert is_compacted_after is True
+
 
 
 async def test_purge_expired_raw_data(s3_mock):

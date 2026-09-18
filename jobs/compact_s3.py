@@ -57,6 +57,36 @@ def _map_keys(response: dict) -> S3BatchFile:
     )
 
 
+async def _is_batch_compacted(client, key: str) -> bool:
+    """
+    Consulta si el objeto S3 crudo ya tiene la etiqueta compacted=true.
+    """
+    try:
+        tagging = await client.get_object_tagging(
+            Bucket=settings.s3_bucket_name,
+            Key=key
+        )
+        tag_set = tagging.get('TagSet', [])
+        return any(tag.get('Key') == 'compacted' and tag.get('Value') == 'true' for tag in tag_set)
+    except Exception:
+        return False
+
+
+async def tag_batches_as_compacted(client, batches: List[S3BatchFile]) -> None:
+    """
+    Aplica la etiqueta compacted=true en S3 a los lotes crudos procesados.
+    """
+    for batch in batches:
+        try:
+            await client.put_object_tagging(
+                Bucket=settings.s3_bucket_name,
+                Key=batch.key,
+                Tagging={'TagSet': [{'Key': 'compacted', 'Value': 'true'}]}
+            )
+        except Exception as e:
+            log.error(f"Error al aplicar etiqueta S3 a {batch.key}: {e}")
+
+
 async def get_list_of_jobs(client) -> List[str]:
     try:
         paginator = client.get_paginator('list_objects_v2')
@@ -86,13 +116,18 @@ async def get_list_of_batches(client, job_prefix: str, semaphore: asyncio.Semaph
             total_tasks = 0
             total_bytes = 0
             last_modified = None
-            mapped_tasks = []
+            uncompacted_batches = []
 
             async for page in paginator.paginate(Bucket=settings.s3_bucket_name, Prefix=job_prefix):
                 contents = page.get('Contents', [])
                 for batch in contents:
                     if batch['Key'] == job_prefix:
                         continue
+                    
+                    is_compacted = await _is_batch_compacted(client, batch['Key'])
+                    if is_compacted:
+                        continue
+
                     total_tasks += 1
                     total_bytes += batch['Size']
                     task_date = batch['LastModified']
@@ -100,7 +135,9 @@ async def get_list_of_batches(client, job_prefix: str, semaphore: asyncio.Semaph
                     if last_modified is None or task_date > last_modified:
                         last_modified = task_date
 
-                    mapped_tasks.append(_map_keys(batch))
+                    mapped = _map_keys(batch)
+                    mapped.is_compacted = False
+                    uncompacted_batches.append(mapped)
 
             if last_modified is None:
                 last_modified = datetime.datetime.now(datetime.timezone.utc)
@@ -116,7 +153,7 @@ async def get_list_of_batches(client, job_prefix: str, semaphore: asyncio.Semaph
                 total_bytes=total_bytes,
                 last_modified=last_modified,
                 inactive_time=now_utc - last_modified,
-                batches=mapped_tasks
+                batches=uncompacted_batches
             )
         except Exception as e:
             log.error(
@@ -149,7 +186,6 @@ async def _upload_compacted_file(
     )
     log.info(f"Subiendo archivo Parquet compactado Parte {part_idx} a S3: {s3_key}")
     
-    # upload_file de aioboto3 es nativamente asíncrono y no bloqueante para archivos locales
     await client.upload_file(
         Filename=local_path,
         Bucket=settings.s3_bucket_name,
@@ -165,7 +201,6 @@ async def clear_job(client, job: ListOfJobs) -> None:
             f"Iniciando purga de la Landing Zone para el Job: {job.prefix}")
         objects_to_delete = [{'Key': batch.key} for batch in job.batches]
 
-        # Eliminación masiva controlada en bloques de 1000 objetos (Límite API de AWS S3)
         for i in range(0, len(objects_to_delete), 1000):
             chunk = objects_to_delete[i:i+1000]
             await client.delete_objects(
@@ -179,45 +214,8 @@ async def clear_job(client, job: ListOfJobs) -> None:
             f"Error crítico en la purga del Job: {job.prefix} | Error: {e}")
 
 
-async def _is_job_already_compacted(client, job: ListOfJobs) -> bool:
-    """
-    Verifica si los datos de un Job ya han sido compactados previamente a Parquet en S3.
-    Compara la existencia de archivos en compacted-data/job_id=<job_id>/ y verifica
-    si la fecha de modificación del Parquet es igual o superior a la fecha del último lote raw.
-    """
-    if not job or not job.batches:
-        return False
-
-    job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
-    compacted_prefix = f"{settings.s3_prefix_compacted_data}/job_id={job_id}/"
-
-    try:
-        response = await client.list_objects_v2(
-            Bucket=settings.s3_bucket_name,
-            Prefix=compacted_prefix
-        )
-        contents = response.get('Contents', [])
-        if not contents:
-            return False
-
-        latest_compacted_time = max(obj['LastModified'] for obj in contents)
-        if latest_compacted_time.tzinfo is None:
-            latest_compacted_time = latest_compacted_time.replace(
-                tzinfo=datetime.timezone.utc)
-
-        job_last_modified = job.last_modified
-        if job_last_modified.tzinfo is None:
-            job_last_modified = job_last_modified.replace(
-                tzinfo=datetime.timezone.utc)
-
-        return latest_compacted_time >= job_last_modified
-    except Exception as e:
-        log.error(
-            f"Error al verificar estado de compactación previa para {job.prefix}: {e}")
-        return False
-
-
 async def purge_expired_raw_data(client) -> int:
+
     """
     Examina la Landing Zone (raw-data/) y elimina únicamente aquellos objetos
     cuya fecha de modificación supere los días de retención (raw_data_retention_days).
@@ -382,11 +380,6 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
                 f"Ignorando Job {job.prefix} | No cumple umbrales mínimos de tamaño o inactividad.")
             return None
 
-        if await _is_job_already_compacted(client, job):
-            log.info(
-                f"Ignorando Job {job.prefix} | Ya se encuentra compactado previamente en Parquet.")
-            return None
-
         job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
         schema = _get_compaction_schema()
         compactor = JobCompactor(client, job, schema, job_id)
@@ -423,8 +416,12 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
                 compactor.clean_local_file()
                 return None
 
-            log.info(f"Job {job_id} consolidado globalmente de forma exitosa en {compactor.part_counter} parte(s).")
+            # Marcar de forma determinista todos los lotes procesados con la etiqueta S3 compacted=true
+            await tag_batches_as_compacted(client, job.batches)
+
+            log.info(f"Job {job_id} consolidado globalmente de forma exitosa en {compactor.part_counter} parte(s) y etiquetado en S3.")
             return job
+
 
         except Exception as e:
             log.error(f"Fallo crítico al compactar Job: {job.prefix} | Error: {e}")
