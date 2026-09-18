@@ -1,0 +1,70 @@
+# CronJob de Kubernetes para el Compactador de Data Lake S3 y Purga de Retención TTL
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: data-lake-compactor
+  namespace: web-scraping-distributed
+  labels:
+    app: data-lake-compactor
+spec:
+  # Ejecución cada 4 horas con ventana de recuperación de 6h ante suspensión/apagado local
+  schedule: "0 */4 * * *"
+  startingDeadlineSeconds: 21600
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: data-lake-compactor
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          containers:
+            - name: compactor
+              image: arturocarrillojimenez/web-scraping-jobs:latest
+              command: ["python", "compact_s3.py"]
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "128Mi"
+                  ephemeral-storage: "100Mi"
+                limits:
+                  cpu: "400m"
+                  memory: "256Mi"
+                  ephemeral-storage: "300Mi"
+              envFrom:
+                - configMapRef:
+                    name: scraping-config
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: AWS_ACCESS_KEY_ID
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: AWS_SECRET_ACCESS_KEY
+                - name: S3_ENDPOINT_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: S3_ENDPOINT_URL
+                - name: S3_BUCKET_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: S3_BUCKET_NAME
+                - name: DEFAULT_REGION_AWS
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: DEFAULT_REGION_AWS
+                - name: RAW_DATA_RETENTION_DAYS
+                  value: "7"

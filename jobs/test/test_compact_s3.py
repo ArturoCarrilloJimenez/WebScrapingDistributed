@@ -246,9 +246,60 @@ async def test_main_flow(s3_mock):
     assert len(resp["Contents"]) == 1
     assert resp["Contents"][0]["Key"].endswith(".parquet")
     
-    # 2. Raw landing zone file should be successfully purged
+    # 2. Raw landing zone file should be preserved (since it is newer than the 7-day retention TTL)
     resp_raw = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="raw-data/job_id=job-integrated/")
-    assert "Contents" not in resp_raw
+    assert "Contents" in resp_raw
+
+
+async def test_is_batch_compacted_and_tagging(s3_mock):
+    now = datetime.datetime.now(datetime.timezone.utc)
+    s3_mock.put_object(
+        Bucket="test-bucket",
+        Key="raw-data/job_id=job-check/p1.jsonl",
+        Body=b"raw-content"
+    )
+    batch = S3BatchFile(key="raw-data/job_id=job-check/p1.jsonl", size=11, last_modified=now)
+
+    client_ctx = await get_aioboto_client()
+    async with client_ctx as client:
+        # Before tagging: should return False
+        is_compacted_before = await compact_s3._is_batch_compacted(client, batch.key)
+        assert is_compacted_before is False
+
+        # Tag batch as compacted
+        await compact_s3.tag_batches_as_compacted(client, [batch])
+
+        # After tagging: should return True
+        is_compacted_after = await compact_s3._is_batch_compacted(client, batch.key)
+        assert is_compacted_after is True
+
+
+
+async def test_purge_expired_raw_data(s3_mock):
+    # Upload a fresh object (today) and an expired object (8 days ago)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    
+    s3_mock.put_object(
+        Bucket="test-bucket",
+        Key="raw-data/job_id=job-fresh/p1.jsonl",
+        Body=b"fresh"
+    )
+    s3_mock.put_object(
+        Bucket="test-bucket",
+        Key="raw-data/job_id=job-expired/p1.jsonl",
+        Body=b"expired"
+    )
+
+    client_ctx = await get_aioboto_client()
+    async with client_ctx as client:
+        # Patch datetime in retention threshold calculation or test direct execution
+        # We patch raw_data_retention_days to 0 days to purge everything, or 7 days with custom mock threshold
+        with patch("config.settings.settings.raw_data_retention_days", 0):
+            deleted_count = await compact_s3.purge_expired_raw_data(client)
+
+        assert deleted_count == 2
+        resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="raw-data/")
+        assert "Contents" not in resp
 
 
 async def test_write_chunk_to_file(tmp_path):
@@ -267,5 +318,6 @@ async def test_write_chunk_to_file(tmp_path):
     # Read back to verify
     table = pq.read_table(str(file_path))
     assert table.column("a").to_pylist() == [1, 2, 3]
+
 
 

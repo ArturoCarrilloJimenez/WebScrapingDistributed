@@ -83,6 +83,7 @@ El módulo comparte un objeto centralizado de configuración mediante `jobs/conf
 | `S3_BUCKET_NAME` | String | `scraping-data-lake` | Nombre del bucket del Data Lake. |
 | `S3_PREFIX_RAW_DATA` | String | `raw-data` | Carpeta virtual de la Landing Zone de entrada. |
 | `S3_PREFIX_COMPACTED_DATA` | String | `compacted-data` | Carpeta virtual de destino para datos compactados Parquet. |
+| `RAW_DATA_RETENTION_DAYS` | Integer | `7` | Días de retención TTL de los datos crudos JSONL antes de su purga. |
 | `AWS_ACCESS_KEY_ID` | String | `test` | Clave de acceso de AWS. |
 | `AWS_SECRET_ACCESS_KEY` | String | `test` | Clave secreta de acceso de AWS. |
 | `DEFAULT_REGION_AWS` | String | `us-east-1` | Región por defecto de AWS. |
