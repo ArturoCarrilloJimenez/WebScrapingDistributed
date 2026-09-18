@@ -178,6 +178,7 @@ WebScrapingDistributed/
 │   ├── test/                       # Tests unitarios del compactador S3
 │   ├── compact_s3.py               # Job ETL de compacción de JSONL fragmentado a Parquet ZSTD
 │   ├── pyproject.toml              # Gestor de dependencias del módulo jobs
+│   ├── Dockerfile                  # Imagen Docker ligera dedicada para ejecución de Jobs
 │   └── README.md
 │
 ├── shared/                         # Biblioteca de Código y Modelos Compartidos
@@ -185,11 +186,27 @@ WebScrapingDistributed/
 │       ├── models/                 # Modelos Pydantic V2 compartidos (Task, Response, FieldSpec)
 │       └── logging.py              # Logger JSON estructurado con trazabilidad
 │
+├── scripts/                        # Scripts de Automatización y Operación de Clúster
+│   ├── deploy-k8.ps1               # Despliegue secuencial de infraestructura K8s (PowerShell)
+│   ├── deploy-k8.sh                # Despliegue secuencial de infraestructura K8s (Bash)
+│   ├── update-k8.ps1               # Actualización y Rolling Update sin pérdida de datos (PowerShell)
+│   └── update-k8.sh                # Actualización y Rolling Update sin pérdida de datos (Bash)
+│
 ├── infra/                          # Infraestructura como Código (IaC) y Emulación Local
 │   ├── terraform/                  # Configuración Terraform IaC (SQS, DLQ, S3 Data Lake)
 │   │   ├── main.tf
 │   │   └── terraform.tf
-│   ├── k8s/                        # Manifestos de Kubernetes (Namespace, ConfigMap, Secrets, Pods)
+│   ├── k8s/                        # Manifestos de Kubernetes (Namespace, Secrets, Deployments, KEDA, CronJob)
+│   │   ├── 00-namespace.yaml
+│   │   ├── 01-config-map.yml
+│   │   ├── 02-secret.yaml
+│   │   ├── 03-pvc-emulator.yaml
+│   │   ├── 04-emulator-aws.yaml
+│   │   ├── 05-producer.yaml
+│   │   ├── 06-worker-static.yaml
+│   │   ├── 07-worker-dynamic.yaml
+│   │   ├── 08-hpa-keda.yaml
+│   │   └── 09-cronjob-compactor.yaml
 │   └── init-aws.sh                 # Script Bash de inicialización para emulador local (Floci)
 │
 ├── docker-compose.yml              # Entorno de desarrollo multi-contenedor
@@ -289,33 +306,52 @@ terraform apply
 
 ---
 
-### 4. Opción C: Despliegue en Kubernetes
+### 4. Opción C: Despliegue en Kubernetes (1 Solo Comando)
 
-Para aplicar los manifiestos en tu clúster de Kubernetes local (Docker Desktop / minikube):
+Para desplegar toda la infraestructura en tu clúster de Kubernetes local (Docker Desktop / minikube / K3s), utiliza los scripts automatizados incluidos en `scripts/`:
 
-```bash
-kubectl apply -f infra/k8s/00-namespace.yaml
-kubectl apply -f infra/k8s/01-config-map.yml
-kubectl apply -f infra/k8s/02-secret.yaml
-kubectl apply -f infra/k8s/03-pvc-emulator.yaml
-kubectl apply -f infra/k8s/04-emulator-aws.yaml
-kubectl apply -f infra/k8s/05-producer.yaml
-kubectl apply -f infra/k8s/06-worker-static.yaml
-kubectl apply -f infra/k8s/07-worker-dynamic.yaml
-kubectl apply -f infra/k8s/08-hpa-keda.yaml
-```
+* **En Windows (PowerShell):**
+  ```powershell
+  .\scripts\deploy-k8.ps1
+  ```
+* **En Linux / macOS / Git Bash:**
+  ```bash
+  ./scripts/deploy-k8.sh
+  ```
+
+Estos scripts aplican de forma ordenada los manifiestos `00` al `09` (Namespace, ConfigMaps, Secrets, PVC persistente, Emulador AWS, Producer, Workers con autoescalado KEDA a cero y CronJob del Compactor S3).
 
 ---
 
-### 5. Ejecutar Job ETL de Compacción a Parquet (`jobs/`)
+### 5. Actualizaciones de Versión Seguras (Zero Data Loss)
 
-Para ejecutar la compacción batch del Data Lake (convertir fragmentos JSONL a Parquet ZSTD):
+Cuando subas nuevas versiones de código o imágenes Docker (`producer`, `worker` o `jobs`), puedes desplegar la actualización de forma segura **sin perder los datos del Data Lake S3 ni los mensajes en cola**:
 
-```bash
-cd jobs
-uv sync
-uv run python compact_s3.py
-```
+* **En Windows (PowerShell):**
+  ```powershell
+  .\scripts\update-k8.ps1
+  ```
+* **En Linux / macOS / Git Bash:**
+  ```bash
+  ./scripts/update-k8.sh
+  ```
+
+> [!TIP]
+> **¿Por qué es seguro?** El script preserva el almacenamiento persistente (`floci-data-pvc`) y ejecuta un *Rolling Update* progresivo (`kubectl rollout restart`), garantizando cero tiempo de inactividad (*zero-downtime*) y manteniendo intactos todos los datos históricos.
+
+---
+
+### 6. Ejecutar Job ETL de Compacción a Parquet (`jobs/`)
+
+El compactor consolida los fragmentos `.jsonl` a **Parquet (ZSTD)** y retiene los archivos raw durante 7 días (TTL) mediante etiquetado S3 (`compacted=true`).
+
+* **En Kubernetes:** Se ejecuta automáticamente cada 4 horas vía CronJob (`infra/k8s/09-cronjob-compactor.yaml`).
+* **Ejecución Local Manual:**
+  ```bash
+  cd jobs
+  uv sync
+  uv run python compact_s3.py
+  ```
 
 ---
 
@@ -354,10 +390,13 @@ uv run pytest
 - [x] **Control de Resiliencia Inteligente**: Clasificación de fallos y backoff dinámico en SQS.
 - [x] **Módulo de Rotación de Proxies**: Static Pool y Backconnect Gateways con Sticky Sessions.
 - [x] **Almacenamiento en Data Lake S3**: Volcado en memoria RAM (`JobBufferService`) en formato JSON Lines particionado Hive (`scraping-data-lake`).
-- [x] **Job ETL Compactor (`jobs/`)**: Compacción batch de JSONL a **Parquet (ZSTD)** para análisis analítico en Athena / Spark.
+- [x] **Job ETL Compactor (`jobs/`)**: Compacción batch de JSONL a **Parquet (ZSTD)** con Object Tagging (`compacted=true`) y purgado automático TTL (7 días).
 - [x] **Infraestructura como Código (IaC)**: Módulos Terraform (`infra/terraform/`) para SQS, DLQ y S3.
-- [x] **Manifiestos de Kubernetes (`infra/k8s/`)**: Namespace, ConfigMaps, Secrets y Deployments de microservicios.
-- [x] **Pipeline CI/CD en GitHub Actions**: Validación en PRs con Pytest + SonarCloud y auto-push matricial de imágenes Docker a Docker Hub en `main`.
-- [ ] **Escalado Automático en K8s (KEDA)**: Autoscaling de Workers K8s basado en la métrica de longitud de cola en SQS (`07-hpa-keda.yaml`).
+- [x] **Manifiestos de Kubernetes (`infra/k8s/`)**: Namespace, ConfigMaps, Secrets, PVC persistente, Deployments y CronJob de compactación (`00` a `09`).
+- [x] **Escalado Automático en K8s (KEDA)**: Autoscaling de Workers K8s basado en la longitud de colas SQS (`08-hpa-keda.yaml`) con Scale-to-Zero.
+- [x] **Scripts de Operación Unificada (`scripts/`)**: Despliegue (`deploy-k8`) y actualización sin pérdida de datos (`update-k8`) para PowerShell y Bash.
+- [x] **Pipeline CI/CD en GitHub Actions**: Validación en PRs con Pytest + SonarCloud y auto-push matricial de imágenes Docker a Docker Hub en `main` (`producer`, `worker`, `jobs`).
+- [ ] **Despliegue en VPS (K3s) o AWS Fargate**: Despliegue de los microservicios en un clúster de Kubernetes (K3s) o en AWS Fargate.
 - [ ] **Base de Datos de Estado**: Guardado de estados intermedios y de-duplicación de URLs en MongoDB / PostgreSQL.
 - [ ] **Dashboard de Observabilidad**: Panel interactivo (Grafana / Prometheus) para monitorización en tiempo real de colas y métricas del clúster de workers.
+

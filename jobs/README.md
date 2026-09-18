@@ -15,6 +15,8 @@ jobs/
 ├── config/              # Parámetros y variables de entorno globales
 ├── interfaces/          # Modelos de validación (Pydantic) específicos de cada job
 ├── test/                # Suite de pruebas unitarias e integración de los jobs
+├── Dockerfile           # Imagen Docker ligera dedicada para ejecución de Jobs en Kubernetes
+├── pyproject.toml       # Dependencias y configuración de uv para el paquete jobs
 ├── README.md            # Documentación general y catálogo de jobs
 └── compact_s3.py        # [Job] Compactador de Data Lake (Primer job activo)
 ```
@@ -92,17 +94,27 @@ El módulo comparte un objeto centralizado de configuración mediante `jobs/conf
 
 ## 🛠️ Ejecución y Suite de Pruebas
 
-### Lanzamiento de Jobs Individuales
+### 1. Ejecución Automática en Kubernetes (CronJob)
+El compactador está desplegado como un `CronJob` de Kubernetes (`infra/k8s/09-cronjob-compactor.yaml`) que se dispara automáticamente cada 4 horas (`0 */4 * * *`):
+```bash
+# Comprobar el estado del CronJob
+kubectl get cronjob -n web-scraping-distributed
+
+# Lanzar una ejecución manual puntual en el clúster
+kubectl create job --from=cronjob/data-lake-compactor manual-compaction-test -n web-scraping-distributed
+```
+
+### 2. Lanzamiento Local Manual
 Los jobs se invocan de forma independiente desde su raíz usando el gestor de dependencias `uv`:
 ```bash
-# Lanzar el compactador de S3
+# Lanzar el compactador de S3 localmente
 uv run compact_s3.py
 
 # Lanzar futuros jobs (ejemplo)
 uv run limpieza_temporales.py
 ```
 
-### Batería de Pruebas Integradas
+### 3. Batería de Pruebas Integradas
 Las pruebas se localizan en `jobs/test/` y simulan la infraestructura AWS usando un servidor HTTP local de Moto en memoria para aislamiento absoluto:
 ```bash
 # Ejecutar todos los tests del módulo
