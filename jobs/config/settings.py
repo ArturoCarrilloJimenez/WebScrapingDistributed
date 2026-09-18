@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     s3_prefix_raw_data: str = "raw-data"  # Prefijo de las claves de S3 para los datos crudos
     s3_prefix_compacted_data: str = "compacted-data"  # Prefijo de las claves de S3 para los datos compactados
     s3_region: str = default_region_aws
+    raw_data_retention_days: int = 7  # Días de retención para los datos crudos en la Landing Zone (TTL)
 
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(

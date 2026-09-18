@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import json
 import os
-from typing import List, Dict, Any, AsyncIterator
+from typing import List
 import uuid
 
 import aioboto3
@@ -179,6 +179,101 @@ async def clear_job(client, job: ListOfJobs) -> None:
             f"Error crítico en la purga del Job: {job.prefix} | Error: {e}")
 
 
+async def _is_job_already_compacted(client, job: ListOfJobs) -> bool:
+    """
+    Verifica si los datos de un Job ya han sido compactados previamente a Parquet en S3.
+    Compara la existencia de archivos en compacted-data/job_id=<job_id>/ y verifica
+    si la fecha de modificación del Parquet es igual o superior a la fecha del último lote raw.
+    """
+    if not job or not job.batches:
+        return False
+
+    job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
+    compacted_prefix = f"{settings.s3_prefix_compacted_data}/job_id={job_id}/"
+
+    try:
+        response = await client.list_objects_v2(
+            Bucket=settings.s3_bucket_name,
+            Prefix=compacted_prefix
+        )
+        contents = response.get('Contents', [])
+        if not contents:
+            return False
+
+        latest_compacted_time = max(obj['LastModified'] for obj in contents)
+        if latest_compacted_time.tzinfo is None:
+            latest_compacted_time = latest_compacted_time.replace(
+                tzinfo=datetime.timezone.utc)
+
+        job_last_modified = job.last_modified
+        if job_last_modified.tzinfo is None:
+            job_last_modified = job_last_modified.replace(
+                tzinfo=datetime.timezone.utc)
+
+        return latest_compacted_time >= job_last_modified
+    except Exception as e:
+        log.error(
+            f"Error al verificar estado de compactación previa para {job.prefix}: {e}")
+        return False
+
+
+async def purge_expired_raw_data(client) -> int:
+    """
+    Examina la Landing Zone (raw-data/) y elimina únicamente aquellos objetos
+    cuya fecha de modificación supere los días de retención (raw_data_retention_days).
+    Devuelve la cantidad de objetos eliminados.
+    """
+    try:
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        retention_threshold = now_utc - datetime.timedelta(
+            days=settings.raw_data_retention_days
+        )
+        log.info(
+            f"Iniciando inspección de retención (TTL {settings.raw_data_retention_days} días) en Landing Zone. "
+            f"Purgando objetos crudos anteriores a: {retention_threshold.isoformat()}"
+        )
+
+        paginator = client.get_paginator('list_objects_v2')
+        expired_keys = []
+
+        async for page in paginator.paginate(
+            Bucket=settings.s3_bucket_name,
+            Prefix=settings.s3_prefix_raw_data + "/"
+        ):
+            contents = page.get('Contents', [])
+            for obj in contents:
+                last_mod = obj['LastModified']
+                if last_mod.tzinfo is None:
+                    last_mod = last_mod.replace(tzinfo=datetime.timezone.utc)
+                if last_mod < retention_threshold:
+                    expired_keys.append({'Key': obj['Key']})
+
+        if not expired_keys:
+            log.info(
+                "No se encontraron objetos caducados en la Landing Zone.")
+            return 0
+
+        log.info(
+            f"Se encontraron {len(expired_keys)} objeto(s) caducados. Procediendo a purgar...")
+        total_deleted = 0
+
+        for i in range(0, len(expired_keys), 1000):
+            chunk = expired_keys[i:i + 1000]
+            await client.delete_objects(
+                Bucket=settings.s3_bucket_name,
+                Delete={'Objects': chunk}
+            )
+            total_deleted += len(chunk)
+
+        log.info(
+            f"Purga de retención completada. Total de objetos raw eliminados: {total_deleted}")
+        return total_deleted
+    except Exception as e:
+        log.error(
+            f"Error crítico durante la purga de retención de datos raw: {e}")
+        raise
+
+
 def _is_job_eligible(job: ListOfJobs) -> bool:
     """
     Evalúa si un job cumple con las condiciones mínimas para ser compactado
@@ -287,6 +382,11 @@ async def process_job(client, job: ListOfJobs, compaction_semaphore: asyncio.Sem
                 f"Ignorando Job {job.prefix} | No cumple umbrales mínimos de tamaño o inactividad.")
             return None
 
+        if await _is_job_already_compacted(client, job):
+            log.info(
+                f"Ignorando Job {job.prefix} | Ya se encuentra compactado previamente en Parquet.")
+            return None
+
         job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
         schema = _get_compaction_schema()
         compactor = JobCompactor(client, job, schema, job_id)
@@ -340,50 +440,38 @@ async def main():
         try:
             # Fase 1: Descubrimiento de Carpetas Virtuales
             job_prefixes = await get_list_of_jobs(client)
-            if not job_prefixes:
+            if job_prefixes:
+                # Fase 2: Análisis Concurrente de Metadatos (I/O Bound)
+                metadata_semaphore = asyncio.Semaphore(20)
+                metadata_tasks = [
+                    get_list_of_batches(client, prefix, metadata_semaphore)
+                    for prefix in job_prefixes
+                ]
+
+                analyzed_jobs: List[ListOfJobs] = await asyncio.gather(*metadata_tasks, return_exceptions=False)
                 log.info(
-                    "No se encontraron particiones de datos en la Landing Zone.")
-                return
+                    f"Análisis finalizado. {len(analyzed_jobs)} Jobs validados.")
 
-            # Fase 2: Análisis Concurrente de Metadatos (I/O Bound)
-            metadata_semaphore = asyncio.Semaphore(20)
-            metadata_tasks = [
-                get_list_of_batches(client, prefix, metadata_semaphore)
-                for prefix in job_prefixes
-            ]
+                # Fase 3: Procesamiento de Compactación Concurrente Limitada (CPU/RAM Bound)
+                compaction_semaphore = asyncio.Semaphore(3)
+                compaction_tasks = [
+                    process_job(client, job, compaction_semaphore)
+                    for job in analyzed_jobs
+                ]
 
-            analyzed_jobs: List[ListOfJobs] = await asyncio.gather(*metadata_tasks, return_exceptions=False)
-            log.info(
-                f"Análisis finalizado. {len(analyzed_jobs)} Jobs validados.")
+                raw_results = await asyncio.gather(*compaction_tasks, return_exceptions=False)
 
-            # Fase 3: Procesamiento de Compactación Concurrente Limitada (CPU/RAM Bound)
-            compaction_semaphore = asyncio.Semaphore(3)
-            compaction_tasks = [
-                process_job(client, job, compaction_semaphore)
-                for job in analyzed_jobs
-            ]
-
-            raw_results = await asyncio.gather(*compaction_tasks, return_exceptions=False)
-
-            # FILTRADO DE COMPROMISO: Descartamos los retornos None (Jobs ignorados)
-            jobs_successfully_compacted = [
-                job for job in raw_results if job is not None]
-            log.info(
-                f"Proceso analítico finalizado. {len(jobs_successfully_compacted)} jobs consolidados con éxito.")
-
-            # Fase 4: Purga e Idempotencia del Data Lake
-            if jobs_successfully_compacted:
+                jobs_successfully_compacted = [
+                    job for job in raw_results if job is not None]
                 log.info(
-                    f"Procediendo a purgar {len(jobs_successfully_compacted)} carpetas de la Landing Zone...")
-                await asyncio.gather(*[clear_job(client, job) for job in jobs_successfully_compacted])
+                    f"Proceso analítico finalizado. {len(jobs_successfully_compacted)} jobs consolidados con éxito en Parquet (conservando origen raw).")
+            else:
+                log.info("No se encontraron particiones de datos en la Landing Zone.")
 
-                # Saneamiento de referencias en RAM
-                for job in jobs_successfully_compacted:
-                    if job in analyzed_jobs:
-                        analyzed_jobs.remove(job)
-
-                log.info(
-                    "Fase de purga y limpieza de memoria finalizada con éxito.")
+            # Fase 4: Purga de Retención TTL (Independiente de la compactación)
+            log.info("Iniciando fase de gestión de retención y expiración TTL...")
+            await purge_expired_raw_data(client)
+            log.info("Proceso global de compactación y retención finalizado con éxito.")
 
         except Exception as e:
             log.error(
@@ -393,3 +481,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
