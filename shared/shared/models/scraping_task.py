@@ -58,5 +58,24 @@ class ScrapingTask(ParserValidatedMixin, BaseModel):
         description="Datos extra que viajan con la tarea (ej: ID de categoría, sesión)",
     )
 
+    # Gobernanza, Cumplimiento Legal y Enrutamiento de Red
+    headers: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Cabeceras HTTP personalizadas para la petición (ej: User-Agent oficial de SEC EDGAR)",
+    )
+    use_proxy: Optional[bool] = Field(
+        default=None,
+        description="Control explícito de proxy: False para IP directa (coste 0€) o True para proxy residencial",
+    )
+    respect_robots_txt: Optional[bool] = Field(
+        default=None,
+        description="Indica si el Worker debe verificar y respetar robots.txt antes de scrapear",
+    )
+    rate_limit_per_second: Optional[float] = Field(
+        default=None,
+        description="Tasa de peticiones por segundo asignada por la política del dominio",
+    )
+
     model_config = ConfigDict(populate_by_name=True,
                               arbitrary_types_allowed=True)
+

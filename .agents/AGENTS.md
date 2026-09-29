@@ -6,26 +6,43 @@ This document configures the operational guidelines, developer profile, architec
 
 ## 🔮 1. Obsidian Vault & Knowledge Graph Synchronization (Mandatory on Startup)
 
-To preserve context, avoid common pitfalls, and align with the developer's knowledge network, the agent **MUST** execute the following protocol at the start of every session/conversation.
+To preserve context, avoid common pitfalls, and align with the developer's knowledge network, the agent **MUST** interact with the Obsidian Vault and the Knowledge Graph exclusively via the **`obsidian`** and **`graphify`** MCP servers.
+
+> [!CAUTION]
+> **Strict Tool Usage Prohibition on Obsidian Vault:**
+> The agent is **STRICTLY PROHIBITED** from using native filesystem tools (`view_file`, `write_to_file`, `replace_file_content`) on any file within the Obsidian Vault (`AI_Brain/`).
+> All reads, writes, searches, and updates to the vault **MUST ALWAYS** be performed through `call_mcp_tool` targeting the `obsidian` or `graphify` MCP servers using vault-relative paths (`path: "AI_Brain/..."`).
+
+### 🛠️ Mandatory MCP Tool Mapping
+
+| Action | MCP Server | MCP Tool (`ToolName`) | Arguments Example |
+| :--- | :--- | :--- | :--- |
+| **Read Vault Note** | `obsidian` | `vault_read` | `{"path": "AI_Brain/02_Projects/WebScrapingDistributed/overview.md"}` |
+| **Search Knowledge Base** | `obsidian` | `search_simple` / `search_query` | `{"query": "dynamic backoff SQS"}` |
+| **Append Diary / Session Log** | `obsidian` | `vault_append` | `{"path": "AI_Brain/03_Telemetry_Logs/engineering_diary.md", "content": "..."}` |
+| **Patch / Modify Section** | `obsidian` | `vault_patch` / `vault_write` | `{"path": "AI_Brain/02_Projects/WebScrapingDistributed/backlog.md", ...}` |
+| **Get Document Structure** | `obsidian` | `vault_get_document_map` | `{"path": "AI_Brain/02_Projects/WebScrapingDistributed/architecture.md"}` |
+| **Query AST Code Graph** | `graphify` | `query_graph` / `get_node` / `get_neighbors` | `{"name": "DynamicParser"}` |
+| **Inspect Graph Stats** | `graphify` | `graph_stats` | `{}` |
 
 ### 🏁 Startup Verification Steps
-1. **Connect to the Obsidian Vault** using the `obsidian` MCP server.
-2. **Read the Projects Index:** Read the Map of Content (MOC) at `AI_Brain/02_Projects/projects_index.md`.
-3. **Analyze Project Context:** For this workspace (`WebScrapingDistributed`), read:
+1. **Connect to the Obsidian Vault** using `call_mcp_tool` with `ServerName: "obsidian"`.
+2. **Read the Projects Index:** Read the Map of Content (MOC) at `AI_Brain/02_Projects/projects_index.md` via `vault_read`.
+3. **Analyze Project Context:** For this workspace (`WebScrapingDistributed`), read via `vault_read`:
    * `AI_Brain/02_Projects/WebScrapingDistributed/overview.md` — High-level objectives and roadmap.
    * `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md` — Current active backlog and Kanban status.
    * `AI_Brain/03_Telemetry_Logs/engineering_diary.md` — Recent development sessions, actions, and milestones.
-4. **Inspect the Knowledge Graph (Knowledge Base):** Check notes in `AI_Brain/04_Knowledge_Base/` to align with the core system concepts and troubleshooting logs:
+4. **Inspect the Knowledge Graph (Knowledge Base):** Check notes in `AI_Brain/04_Knowledge_Base/` via `vault_read` or `search_simple` to align with core concepts:
    * `AI_Brain/04_Knowledge_Base/troubleshooting.md` — Read to understand common DNS, network resolution, Docker, and Floci setup errors.
-   * `AI_Brain/04_Knowledge_Base/well_architected/` — Review the structural pillars of AWS Well-Architected Framework applied to this scraper (especially `reliability.md` and standard concepts under `concepts/` such as SQS resilience or S3 storage optimization).
-5. **Leverage Graphify AST Code Graph:** Query the `graphify` MCP server (`graphify_query`, `graphify_get_subgraph`, `graphify_get_node`) or inspect `AI_Brain/06_Code_Graph/WebScrapingDistributed/` notes to resolve complex symbol relationships, caller-callee chains, and class hierarchies before modifying code.
-6. **Acknowledge Current State:** In the first response to the user, briefly acknowledge the latest session state and any key constraints retrieved from both the project memory and the Knowledge Graph to confirm synchronization.
+   * `AI_Brain/04_Knowledge_Base/well_architected/` — Review the structural pillars of AWS Well-Architected Framework applied to this scraper.
+5. **Leverage Graphify AST Code Graph:** Query the `graphify` MCP server (`query_graph`, `get_node`, `get_neighbors`, `graph_stats`) before modifying code.
+6. **Acknowledge Current State:** In the first response to the user, briefly acknowledge the latest session state and key constraints retrieved from both the project memory and the Knowledge Graph to confirm synchronization.
 
 ### 🔄 Telemetry, Project Memory & Knowledge Base Updates (Mandatory on Every Feature/Change)
-Upon completing tasks, implementing new features, refactoring code, or adding configuration, the agent **MUST** update the Obsidian Vault continuously:
-* **Log the Session:** Append details of the current development actions to `AI_Brain/03_Telemetry_Logs/engineering_diary.md` (or the specific session file in `session_logs/`).
-* **Update the Backlog:** Move completed tasks to `✅ Done` and update in-progress task statuses in `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md`.
-* **Sync Project Documentation Notes (`AI_Brain/02_Projects/WebScrapingDistributed/`):** **ALWAYS** keep the core project notes aligned with the current code state without waiting for explicit prompt reminders. Update:
+Upon completing tasks, implementing new features, refactoring code, or adding configuration, the agent **MUST** update the Obsidian Vault continuously via `obsidian` MCP:
+* **Log the Session:** Append details of the current development actions to `AI_Brain/03_Telemetry_Logs/engineering_diary.md` using `vault_append` or `vault_patch`.
+* **Update the Backlog:** Move completed tasks to `✅ Done` and update in-progress task statuses in `AI_Brain/02_Projects/WebScrapingDistributed/backlog.md` via `vault_patch` or `vault_write`.
+* **Sync Project Documentation Notes (`AI_Brain/02_Projects/WebScrapingDistributed/`):** **ALWAYS** keep the core project notes aligned with the current code state using `vault_write` or `vault_patch`. Update:
   * `overview.md`: Tech stack, roadmap, completed milestones.
   * `architecture.md`: Component diagrams, data flows, new microservices or jobs.
   * `connection_map.md`: Ports, endpoints, singletons, and NodePort mappings.
@@ -34,7 +51,7 @@ Upon completing tasks, implementing new features, refactoring code, or adding co
   * `source_code_index.md`: Directory tree and module responsibilities.
   * `decisions_log.md`: Add Architecture Decision Records (ADRs) for major design tradeoffs.
   * `technical_debt.md`: Transition resolved items to completed and update upcoming debt.
-* **Create Knowledge Base Concept Notes:** When new patterns or security/resilience mechanisms are introduced (e.g. S3 compaction, anti-bot evasion, dynamic backoff), create a dedicated markdown note under `AI_Brain/04_Knowledge_Base/`.
+* **Create Knowledge Base Concept Notes:** When new patterns or security/resilience mechanisms are introduced (e.g. S3 compaction, anti-bot evasion, dynamic backoff), create a dedicated note under `AI_Brain/04_Knowledge_Base/` via `vault_write`.
 * **Refresh Graphify AST Code Graph:** Whenever code files (`producer/`, `worker/`, `jobs/`, `shared/`) are created or modified, execute incremental Graphify extraction and Obsidian export:
   * `uvx --from graphifyy[mcp] graphify extract . --code-only --out "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
   * `uvx --from graphifyy[mcp] graphify export obsidian --graph "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed\graphify-out\graph.json" --dir "C:\Users\0021824\OneDrive - ViewNext\Documentos\Obsidian Vault\AI_Brain\06_Code_Graph\WebScrapingDistributed"`
@@ -75,6 +92,9 @@ All code generated must adhere to the following developer guidelines:
 * **Logging & Observability:**
   * Use structured JSON logs in production.
   * Inject traceability IDs (e.g., `task_id`, `job_id`, `request_id`) in all log lines.
+* **Diagrams & CLI Communication:**
+  * **In CLI / Chat Responses:** **STRICTLY AVOID** raw graphical Mermaid blocks, as terminal interfaces fail to display them. Always use **clean ASCII text diagrams**, structured Markdown tables, and numbered step-by-step breakdowns.
+  * **In Markdown Files (`.md` on disk / Artifacts):** Mermaid diagrams **are allowed and recommended** for documentation and GitHub rendering.
 
 ---
 

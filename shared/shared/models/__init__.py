@@ -8,3 +8,11 @@ from .batch_task_response import (
     ErrorsBatchResponse,  # noqa: F401
     SummaryBatchResponse,  # noqa: F401
 )
+from .domain_policy import (
+    DomainPolicyBase,  # noqa: F401
+    DomainPolicy,  # noqa: F401
+    DomainPolicyCreate,  # noqa: F401
+    DomainPolicyUpdate,  # noqa: F401
+    DomainPolicyListResponse,  # noqa: F401
+)
+
