@@ -14,8 +14,14 @@ services:
       - SQS_QUEUE_URL_DYNAMIC=http://emulator-aws:4566/000000000000/scraping-tasks-dynamic
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-webscraping_db}
     depends_on:
       - emulator-aws
+      - postgres
 
   worker-static:
     build:
@@ -47,9 +53,13 @@ services:
       - PROXY_IDLE_TIMEOUT=${PROXY_IDLE_TIMEOUT}
       - PROXY_MAX_REQUESTS_PER_SESSION=${PROXY_MAX_REQUESTS_PER_SESSION}
       - PROXY_MIN_REQUESTS_PER_SESSION=${PROXY_MIN_REQUESTS_PER_SESSION}
+
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - emulator-aws
       - producer
+      - redis
 
   worker-dynamic:
     build:
@@ -84,9 +94,14 @@ services:
 
       - PLAYWRIGHT_MAX_TASKS_PER_BROWSER=${PLAYWRIGHT_MAX_TASKS_PER_BROWSER}
       - PLAYWRIGHT_V8_MAX_OLD_SPACE_SIZE_MB=${PLAYWRIGHT_V8_MAX_OLD_SPACE_SIZE_MB}
+
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       - emulator-aws
       - producer
+      - redis
+
   emulator-aws:
     image: floci/floci:latest-compat
     ports:
@@ -102,5 +117,33 @@ services:
       - "./infra/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh"
       - localstack_data:/app/data
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-webscraping_db}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-webscraping_db}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   localstack_data:
+  redis_data:
+  postgres_data:
