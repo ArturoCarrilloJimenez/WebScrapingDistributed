@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 set -e
 
-# Directorio del script y resolución del path de los manifiestos de Kubernetes
+ENVIRONMENT="${1:-local}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_DIR="$SCRIPT_DIR/../infra/k8s"
+DB_DIR="$SCRIPT_DIR/../infra/db"
+OVERLAY_DIR="$K8S_DIR/overlays/$ENVIRONMENT"
 
-echo "🚀 Iniciando despliegue de infraestructura en Kubernetes (Namespace: web-scraping-distributed)..."
+if [ ! -d "$OVERLAY_DIR" ]; then
+    echo "❌ Error: El entorno '$ENVIRONMENT' no existe. Opciones validas: local, prod"
+    exit 1
+fi
 
-kubectl apply -f "$K8S_DIR/00-namespace.yaml"
-kubectl apply -f "$K8S_DIR/01-config-map.yml"
-kubectl apply -f "$K8S_DIR/02-secret.yaml"
-kubectl apply -f "$K8S_DIR/03-pvc-emulator.yaml"
-kubectl apply -f "$K8S_DIR/04-emulator-aws.yaml"
-kubectl apply -f "$K8S_DIR/05-producer.yaml"
-kubectl apply -f "$K8S_DIR/06-worker-static.yaml"
-kubectl apply -f "$K8S_DIR/07-worker-dynamic.yaml"
-kubectl apply -f "$K8S_DIR/08-hpa-keda.yaml"
-kubectl apply -f "$K8S_DIR/09-cronjob-compactor.yaml"
+echo "🚀 1. Sincronizando ConfigMap de PostgreSQL desde $DB_DIR/init.sql..."
+kubectl create namespace web-scraping-distributed --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap postgres-init-sql --from-file=init.sql="$DB_DIR/init.sql" -n web-scraping-distributed --dry-run=client -o yaml | kubectl apply -f -
+
+echo "🚀 2. Desplegando infraestructura con Kustomize (Entorno: $ENVIRONMENT)..."
+kubectl apply -k "$OVERLAY_DIR"
 
 echo "✅ Despliegue completado con éxito en el clúster."

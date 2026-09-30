@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Namespace comun para todos los recursos
+namespace: web-scraping-distributed
+
+# Manifiestos base comunes a todos los entornos
+resources:
+  - 00-namespace.yaml
+  - 01-config-map.yml
+  - 02-secret.yaml
+  - 03.4-redis.yaml
+  - 03.5-postgres.yaml
+  - 05-producer.yaml
+  - 06-worker-static.yaml
+  - 07-worker-dynamic.yaml
+  - 08-hpa-keda.yaml
+  - 09-cronjob-compactor.yaml
