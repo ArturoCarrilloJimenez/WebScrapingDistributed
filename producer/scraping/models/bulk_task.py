@@ -15,11 +15,20 @@ class TaskModel(BaseModel, ParserValidatedMixin):
     priority: int = Field(default=1, ge=1, le=10)
     max_depth: int = Field(default=1, ge=0)
     max_retries: int = Field(default=3, ge=0, le=10)
+    headers: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Cabeceras HTTP personalizadas para la peticion (ej: User-Agent oficial de SEC EDGAR)",
+    )
+    respect_robots_txt: Optional[bool] = Field(
+        default=None,
+        description="Sobreescribe la politica de robots.txt para esta tarea especifica",
+    )
 
     @field_validator("url", mode="after")
     @classmethod
     def convert_url_to_string(cls, v: HttpUrl) -> str:
         return str(v)
+
 
 
 class BulkTaskRequest(BaseModel):

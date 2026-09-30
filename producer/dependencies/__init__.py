@@ -1,1 +1,2 @@
-from dependencies.dependencies import get_scraping_orchestrator
+from dependencies.dependencies import get_scraping_orchestrator, get_domain_policy_service
+
