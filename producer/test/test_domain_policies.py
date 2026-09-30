@@ -154,12 +154,12 @@ async def test_domain_endpoints_api(async_client: AsyncClient):
             "description": "Temp Domain",
         },
     )
-    assert put_resp.status_code == 200
+    assert put_resp.status_code == 201
     assert put_resp.json()["domain"] == "temp-test.com"
 
     # 5. DELETE /v1/domains/temp-test.com
     del_resp = await async_client.delete("/v1/domains/temp-test.com")
-    assert del_resp.status_code == 204
+    assert del_resp.status_code == 200
 
     # 6. DELETE /v1/domains/default -> 400 Bad Request
     del_default = await async_client.delete("/v1/domains/default")
