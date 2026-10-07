@@ -54,16 +54,23 @@ class SecureNetworkClient:
             log.error(
                 f"Error al cerrar sesión rotada en segundo plano para {domain}: {e}")
 
-    async def get_session(self, target_url: str, sticky_session_id: str = None) -> AsyncSession:
+    async def get_session(
+        self,
+        target_url: str,
+        sticky_session_id: str = None,
+        use_proxy: bool = None,
+        custom_headers: dict = None,
+    ) -> AsyncSession:
         parsed_url = urlparse(target_url)
         domain = parsed_url.netloc
 
-        # Obtener Proxy correspondiente
+        # Obtener Proxy correspondiente (respetando si la tarea deshabilita el proxy explícitamente)
         proxy_string = None
-        if self.proxy_provider:
+        if use_proxy is not False and self.proxy_provider:
             proxy_string = self.proxy_provider.get_proxy_url(sticky_session_id)
 
-        key = (domain, proxy_string, sticky_session_id)
+        headers_tuple = tuple(sorted(custom_headers.items())) if custom_headers else None
+        key = (domain, proxy_string, sticky_session_id, headers_tuple)
 
         async with self._lock:
             now = time.time()
@@ -96,6 +103,9 @@ class SecureNetworkClient:
 
             # 3. Creación de una sesión nueva de larga duración
             headers = self._generate_contextual_headers(target_url)
+            if custom_headers:
+                headers.update(custom_headers)
+
             session = AsyncSession(
                 impersonate="chrome",
                 timeout=self.client_timeout,
@@ -126,6 +136,7 @@ class SecureNetworkClient:
                     self._cleanup_idle_sessions())
 
             return session
+
 
     async def _evict_oldest_session(self):
         if not self._pool:

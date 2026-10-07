@@ -91,7 +91,10 @@ class DynamicParser(BaseParser):
             gc.collect()
 
     def _get_proxy(self, task: ScrapingTask) -> Optional[Dict[str, str]]:
-        """Obtiene y formatea la configuración de proxy si está habilitada."""
+        """Obtiene y formatea la configuración de proxy si está habilitada y permitida por la tarea."""
+        if task.use_proxy is False:
+            return None
+
         if not (self.network_client and self.network_client.proxy_provider):
             return None
 
@@ -113,26 +116,34 @@ class DynamicParser(BaseParser):
         return playwright_proxy
 
     async def _init_browser_context(self, task: ScrapingTask, config: PlaywrightConfig):
-        """Crea un BrowserContext aislado configurado con Client Hints y timeouts."""
+        """Crea un BrowserContext aislado configurado con Client Hints, headers y timeouts."""
         browser = await self.get_browser()
 
         browser_version = browser.version
-        dynamic_user_agent = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser_version} Safari/537.36"
+        default_ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{browser_version} Safari/537.36"
+        user_agent = (task.headers or {}).get("User-Agent", default_ua)
+
+        extra_headers = {
+            "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
+        }
+        if task.headers:
+            for k, v in task.headers.items():
+                if k.lower() != "user-agent":
+                    extra_headers[k] = v
 
         try:
             context = await browser.new_context(
                 proxy=self._get_proxy(task),
-                user_agent=dynamic_user_agent,
+                user_agent=user_agent,
                 viewport={"width": 1280, "height": 720},
-                extra_http_headers={
-                    "Accept-Language": "es-ES,es;q=0.9,en-US;q=0.8,en;q=0.7",
-                }
+                extra_http_headers=extra_headers,
             )
 
             context.set_default_navigation_timeout(config.timeout_ms)
             context.set_default_timeout(config.timeout_ms)
 
             return context
+
         except Exception as e:
             self.log.error(f"Error inesperado en tarea dinámica {task.task_id}: {str(e)}")
             raise ScrapingError(

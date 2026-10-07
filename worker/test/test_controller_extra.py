@@ -96,13 +96,15 @@ async def test_process_task_wrapper_stops_if_not_running(controller):
 async def test_process_task_wrapper_errors(controller):
     task = ScrapingTask(
         job_id="job_1", batch_id="batch_1", task_id="task_1", url="https://x.com",
-        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}}
+        parser_type="static_css", parser_config={"selectors": {"headline": "h1"}},
+        respect_robots_txt=False,
     )
     
     # Scenario A: Parser raises ScrapingError
     mock_parser = AsyncMock()
     mock_parser.parse.side_effect = ScrapingError(ErrorCategory.TIMEOUT, "Timeout", "task_1")
     controller.parser_factory.get_parser.return_value = mock_parser
+
     
     with patch.object(controller, "_handle_scraping_error", new_callable=AsyncMock) as mock_handle:
         await controller._process_task_wrapper(task)

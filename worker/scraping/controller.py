@@ -1,26 +1,38 @@
 import asyncio
-from typing import List
 from shared.logging import Logger
 from infrastructure.task.base import BaseConsumer
 from shared.models import ScrapingTask
 from scraping.parsers import ParserFactory
-from config.settings import settings
 from scraping.exceptions import ErrorCategory, ScrapingError
 from scraping.services.storage_buffer import JobBufferService
+from scraping.security import DomainRateLimiter, RobotsCacheService
+from config.settings import settings
+
 
 log = Logger("Worker Engine")
 
 
 class WorkerController:
-    def __init__(self, consumer: BaseConsumer, parser_factory: ParserFactory, max_concurrency: int = 5, buffer_service: JobBufferService = None):
+    def __init__(
+        self,
+        consumer: BaseConsumer,
+        parser_factory: ParserFactory,
+        max_concurrency: int = 5,
+        buffer_service: JobBufferService | None = None,
+        rate_limiter: DomainRateLimiter | None = None,
+        robots_service: RobotsCacheService | None = None,
+    ):
         self.consumer = consumer
         self.parser_factory = parser_factory
         self.buffer_service = buffer_service
+        self.rate_limiter = rate_limiter or DomainRateLimiter()
+        self.robots_service = robots_service or RobotsCacheService()
         self.max_concurrency = max_concurrency
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self.running = True
         self._active_tasks = set()
         self.NUM_MAX_TASKS = settings.num_max_tasks
+
 
         # Buffer en memoria para acumular las tareas que requieren ACK
         self.ack_queue = asyncio.Queue()
@@ -98,6 +110,15 @@ class WorkerController:
         except Exception as e:
             log.error(f"Error cerrando navegadores Playwright en el shutdown: {e}")
 
+        # PASO 7: Cerrar servicios de seguridad y conexiones a Redis
+        try:
+            if hasattr(self.rate_limiter, "close"):
+                await self.rate_limiter.close()
+            if hasattr(self.robots_service, "close"):
+                await self.robots_service.close()
+        except Exception as e:
+            log.error(f"Error cerrando servicios de seguridad en shutdown: {e}")
+
     async def run(self) -> None:
         """Punto de entrada principal (El bucle infinito). Flujo plano y legible."""
         self._main_task = asyncio.current_task()
@@ -127,6 +148,26 @@ class WorkerController:
                 log.warning(f"Evitando disparo de red para tarea {task.task_id} debido a apagado del motor.")
                 return
 
+            # 1. Verificación legal y cumplimiento normativo (robots.txt)
+            user_agent = (task.headers or {}).get("User-Agent")
+            allowed, robots_status = await self.robots_service.is_allowed(
+                url=str(task.url),
+                user_agent=user_agent,
+                respect_robots_txt=task.respect_robots_txt,
+            )
+            if not allowed:
+                log.warning(
+                    f"Tarea {task.task_id} descartada por cumplimiento normativo de robots.txt (Status: {robots_status}) | URL: {task.url}"
+                )
+                # Borrar inmediatamente de SQS para no generar reintentos innecesarios
+                await self.ack_queue.put(task)
+                return
+
+            # 2. Control de concurrencia y rate limit por dominio
+            await self.rate_limiter.acquire(
+                url_or_domain=str(task.url),
+                rate_limit_per_second=task.rate_limit_per_second,
+            )
 
             log.info(f"Procesando tarea: {task.task_id} | URL: {task.url}")
             try:
@@ -147,6 +188,7 @@ class WorkerController:
             except Exception as e:
                 log.error(f"Fallo en tarea {task.task_id}: {str(e)}")
 
+
     async def _ack_flusher(self):
         """
         Orquestador: Mantiene el flujo de ACK mientras el worker esté vivo.
@@ -158,7 +200,7 @@ class WorkerController:
             if batch:
                 await self._process_batch(batch)
 
-    async def _gather_batch(self) -> List[ScrapingTask]:
+    async def _gather_batch(self) -> list[ScrapingTask]:
         """
         Responsabilidad única: Recolectar hasta NUM_MAX_TASKS con un timeout.
         """
@@ -181,7 +223,7 @@ class WorkerController:
                 break
         return batch
 
-    async def _process_batch(self, batch: List[ScrapingTask]):
+    async def _process_batch(self, batch: list[ScrapingTask]):
         """
         Responsabilidad única: Envío a SQS y limpieza de estados.
         """
