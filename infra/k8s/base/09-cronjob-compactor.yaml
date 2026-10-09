@@ -7,9 +7,9 @@ metadata:
   labels:
     app: data-lake-compactor
 spec:
-  # Ejecución cada 4 horas con ventana de recuperación de 6h ante suspensión/apagado local
-  schedule: "0 */4 * * *"
-  startingDeadlineSeconds: 21600
+  # Ejecución cada 30 minutos con ventana de recuperación de 1h ante suspensión/apagado local
+  schedule: "*/30 * * * *"
+  startingDeadlineSeconds: 3600
   timeZone: "UTC"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
@@ -42,6 +42,46 @@ spec:
                 - configMapRef:
                     name: scraping-config
               env:
+                - name: RAW_S3_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_ACCESS_KEY_ID
+                - name: RAW_S3_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_SECRET_ACCESS_KEY
+                - name: RAW_S3_ENDPOINT_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_ENDPOINT_URL
+                - name: RAW_S3_BUCKET_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_BUCKET_NAME
+                - name: TARGET_S3_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: TARGET_S3_ACCESS_KEY_ID
+                - name: TARGET_S3_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: TARGET_S3_SECRET_ACCESS_KEY
+                - name: TARGET_S3_ENDPOINT_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: TARGET_S3_ENDPOINT_URL
+                - name: TARGET_S3_BUCKET_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: TARGET_S3_BUCKET_NAME
                 - name: AWS_ACCESS_KEY_ID
                   valueFrom:
                     secretKeyRef:
@@ -67,5 +107,13 @@ spec:
                     secretKeyRef:
                       name: scraping-secrets
                       key: DEFAULT_REGION_AWS
-                - name: RAW_DATA_RETENTION_DAYS
-                  value: "7"
+                - name: S3_PREFIX_RAW_DATA
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: S3_PREFIX_RAW_DATA
+                - name: S3_PREFIX_COMPACTED_DATA
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: S3_PREFIX_COMPACTED_DATA

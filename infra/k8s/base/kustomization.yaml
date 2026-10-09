@@ -11,6 +11,7 @@ resources:
   - 02-secret.yaml
   - 03.4-redis.yaml
   - 03.5-postgres.yaml
+  - 03.6-minio.yaml
   - 05-producer.yaml
   - 06-worker-static.yaml
   - 07-worker-dynamic.yaml

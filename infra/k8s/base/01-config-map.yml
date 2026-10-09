@@ -25,4 +25,5 @@ data:
   POSTGRES_HOST: "postgres-service"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "webscraping_db"
-
+  DELETE_RAW_AFTER_COMPACTION: "True"
+  RAW_DATA_RETENTION_DAYS: "7"

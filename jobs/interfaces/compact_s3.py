@@ -1,5 +1,5 @@
 import datetime
-from typing import Any, List
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -20,7 +20,7 @@ class ListOfJobs(BaseModel):
     total_bytes: int
     last_modified: datetime.datetime
     inactive_time: datetime.timedelta
-    batches: List[S3BatchFile]
+    batches: list[S3BatchFile]
 
 
 class ParseResult(BaseModel):

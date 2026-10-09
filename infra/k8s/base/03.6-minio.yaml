@@ -1,0 +1,100 @@
+# PersistentVolumeClaim para MinIO (Landing Zone Local NVMe)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: web-scraping-distributed
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+
+# Deployment para MinIO (Landing Zone de Microarchivos a Coste 0€)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: web-scraping-distributed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: minio
+          image: elestio/minio:latest
+          command: ["minio", "server", "/data", "--console-address", ":9001"]
+          ports:
+            - containerPort: 9000
+              name: s3-api
+            - containerPort: 9001
+              name: console
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: RAW_S3_ACCESS_KEY_ID
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: RAW_S3_SECRET_ACCESS_KEY
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+              ephemeral-storage: "500Mi"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+              ephemeral-storage: "2Gi"
+          volumeMounts:
+            - name: minio-storage
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: minio-storage
+          persistentVolumeClaim:
+            claimName: minio-pvc
+
+---
+
+# Service ClusterIP para MinIO
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: web-scraping-distributed
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+    - name: s3-api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
