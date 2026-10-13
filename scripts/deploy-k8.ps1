@@ -1,19 +1,20 @@
+param (
+    [ValidateSet("local", "prod")]
+    [string]$Environment = "local"
+)
+
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $K8sDir = Resolve-Path (Join-Path $ScriptDir "..\infra\k8s")
+$DbDir = Resolve-Path (Join-Path $ScriptDir "..\infra\db")
+$OverlayDir = Join-Path $K8sDir "overlays\$Environment"
 
-Write-Host "Iniciando despliegue de infraestructura en Kubernetes (Namespace: web-scraping-distributed)..." -ForegroundColor Cyan
+Write-Host "1. Sincronizando ConfigMap de PostgreSQL desde $DbDir\init.sql..." -ForegroundColor Cyan
+kubectl create namespace web-scraping-distributed --dry-run=client -o yaml | kubectl apply -f -
+kubectl create configmap postgres-init-sql --from-file=init.sql="$DbDir\init.sql" -n web-scraping-distributed --dry-run=client -o yaml | kubectl apply -f -
 
-kubectl apply -f "$K8sDir\00-namespace.yaml"
-kubectl apply -f "$K8sDir\01-config-map.yml"
-kubectl apply -f "$K8sDir\02-secret.yaml"
-kubectl apply -f "$K8sDir\03-pvc-emulator.yaml"
-kubectl apply -f "$K8sDir\04-emulator-aws.yaml"
-kubectl apply -f "$K8sDir\05-producer.yaml"
-kubectl apply -f "$K8sDir\06-worker-static.yaml"
-kubectl apply -f "$K8sDir\07-worker-dynamic.yaml"
-kubectl apply -f "$K8sDir\08-hpa-keda.yaml"
-kubectl apply -f "$K8sDir\09-cronjob-compactor.yaml"
+Write-Host "2. Desplegando infraestructura con Kustomize (Entorno: $Environment)..." -ForegroundColor Cyan
+kubectl apply -k "$OverlayDir"
 
 Write-Host "Despliegue completado con exito en el cluster." -ForegroundColor Green

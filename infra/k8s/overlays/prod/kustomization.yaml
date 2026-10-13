@@ -1,0 +1,7 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Hereda la arquitectura base para despliegue en la nube (AWS / Azure)
+# No incluye emulador local (conecta directamente a Amazon SQS/S3 o Azure Service Bus/Blob)
+resources:
+  - ../../base

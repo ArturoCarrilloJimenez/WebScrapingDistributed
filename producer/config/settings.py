@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+
 class Settings(BaseSettings):
     num_max_tasks: int = 10
     producer_port: int = 8000
@@ -12,6 +13,14 @@ class Settings(BaseSettings):
     sqs_queue_url_dynamic: str = "http://localhost:9324/000000000000/my-queue-dynamic"  # URL de la cola SQS local
     aws_access_key_id: str = "test"  # Clave de acceso de AWS (puede ser cualquier valor para pruebas locales)
     aws_secret_access_key: str = "test"  # Clave secreta de acceso de AWS (puede ser cualquier valor para pruebas locales)
+
+    # Base de Datos PostgreSQL (Gobernanza de Dominios)
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "webscraping_db"
+
 
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(

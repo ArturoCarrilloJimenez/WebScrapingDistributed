@@ -25,9 +25,15 @@ class StaticCSSParser(BaseParser):
 
         try:
             # Obtenemos o reutilizamos la sesión persistente del Pool
-            session = await self.network_client.get_session(str(task.url), task.context.get("sticky_session_id"))
+            session = await self.network_client.get_session(
+                target_url=str(task.url),
+                sticky_session_id=task.context.get("sticky_session_id"),
+                use_proxy=task.use_proxy,
+                custom_headers=task.headers,
+            )
             self.log.info(
                 f"Infiltración TLS Keep-Alive activa. Descargando: {task.url} | Tarea ID: {task.task_id}")
+
 
             response = await session.get(str(task.url), allow_redirects=True)
 

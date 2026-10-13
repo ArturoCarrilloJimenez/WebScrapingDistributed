@@ -12,7 +12,6 @@ pytestmark = pytest.mark.asyncio
 # Helper to get client from the context manager
 async def get_aioboto_client():
     client_ctx = compact_s3._get_client()
-    # We enter the client_ctx context manager and yield the client
     return client_ctx
 
 # 1. Test get_list_of_jobs
@@ -25,7 +24,7 @@ async def test_get_list_of_jobs(s3_mock):
 
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        prefixes = await compact_s3.get_list_of_jobs(client)
+        prefixes = await compact_s3.get_list_of_jobs(client, bucket_name="test-bucket")
     
     assert "raw-data/job_id=job1/" in prefixes
     assert "raw-data/job_id=job2/" in prefixes
@@ -40,7 +39,7 @@ async def test_get_list_of_batches(s3_mock):
     semaphore = asyncio.Semaphore(1)
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        job_info = await compact_s3.get_list_of_batches(client, "raw-data/job_id=job1/", semaphore)
+        job_info = await compact_s3.get_list_of_batches(client, "raw-data/job_id=job1/", semaphore, bucket_name="test-bucket")
         
     assert isinstance(job_info, ListOfJobs)
     assert job_info.prefix == "raw-data/job_id=job1/"
@@ -75,7 +74,7 @@ async def test_clear_job(s3_mock):
     
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        await compact_s3.clear_job(client, job)
+        await compact_s3.clear_job(client, job, bucket_name="test-bucket")
         
     # Verify they are deleted
     resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="raw-data/job_id=job1/")
@@ -96,11 +95,11 @@ async def test_process_job_ignored(s3_mock):
     semaphore = asyncio.Semaphore(1)
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        result = await compact_s3.process_job(client, job, semaphore)
+        result = await compact_s3.process_job(client, client, job, semaphore, raw_bucket="test-bucket", target_bucket="test-bucket")
         
     assert result is None
 
-# 5. Test process_job (compaction execution)
+# 5. Test process_job (compaction execution with Delete-on-Success)
 async def test_process_job_execute(s3_mock):
     now = datetime.datetime.now(datetime.timezone.utc)
     
@@ -144,7 +143,7 @@ async def test_process_job_execute(s3_mock):
         semaphore = asyncio.Semaphore(1)
         client_ctx = await get_aioboto_client()
         async with client_ctx as client:
-            result = await compact_s3.process_job(client, job, semaphore)
+            result = await compact_s3.process_job(client, client, job, semaphore, raw_bucket="test-bucket", target_bucket="test-bucket")
             
     assert result == job
     
@@ -190,7 +189,7 @@ async def test_process_job_file_splitting(s3_mock):
         semaphore = asyncio.Semaphore(1)
         client_ctx = await get_aioboto_client()
         async with client_ctx as client:
-            await compact_s3.process_job(client, job, semaphore)
+            await compact_s3.process_job(client, client, job, semaphore, raw_bucket="test-bucket", target_bucket="test-bucket")
             
     # Should create exactly 1 Parquet file
     resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="compacted-data/job_id=job1/")
@@ -205,10 +204,14 @@ async def test_process_job_file_splitting(s3_mock):
          patch("compact_s3.CHUNK_WRITE_SIZE", 1), \
          patch("compact_s3.TOLERANCIA_COLA_BYTES", 0):
         
+        # Put batches back for Case B
+        s3_mock.put_object(Bucket="test-bucket", Key="raw-data/job_id=job1/p1.jsonl", Body=line1)
+        s3_mock.put_object(Bucket="test-bucket", Key="raw-data/job_id=job1/p2.jsonl", Body=line2)
+        
         semaphore = asyncio.Semaphore(1)
         client_ctx = await get_aioboto_client()
         async with client_ctx as client:
-            await compact_s3.process_job(client, job, semaphore)
+            await compact_s3.process_job(client, client, job, semaphore, raw_bucket="test-bucket", target_bucket="test-bucket")
             
     # Should create exactly 2 Parquet files (split)
     resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="compacted-data/job_id=job1/")
@@ -245,10 +248,6 @@ async def test_main_flow(s3_mock):
     assert "Contents" in resp
     assert len(resp["Contents"]) == 1
     assert resp["Contents"][0]["Key"].endswith(".parquet")
-    
-    # 2. Raw landing zone file should be preserved (since it is newer than the 7-day retention TTL)
-    resp_raw = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="raw-data/job_id=job-integrated/")
-    assert "Contents" in resp_raw
 
 
 async def test_is_batch_compacted_and_tagging(s3_mock):
@@ -263,16 +262,15 @@ async def test_is_batch_compacted_and_tagging(s3_mock):
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
         # Before tagging: should return False
-        is_compacted_before = await compact_s3._is_batch_compacted(client, batch.key)
+        is_compacted_before = await compact_s3._is_batch_compacted(client, batch.key, bucket_name="test-bucket")
         assert is_compacted_before is False
 
         # Tag batch as compacted
-        await compact_s3.tag_batches_as_compacted(client, [batch])
+        await compact_s3.tag_batches_as_compacted(client, [batch], bucket_name="test-bucket")
 
         # After tagging: should return True
-        is_compacted_after = await compact_s3._is_batch_compacted(client, batch.key)
+        is_compacted_after = await compact_s3._is_batch_compacted(client, batch.key, bucket_name="test-bucket")
         assert is_compacted_after is True
-
 
 
 async def test_purge_expired_raw_data(s3_mock):
@@ -292,10 +290,8 @@ async def test_purge_expired_raw_data(s3_mock):
 
     client_ctx = await get_aioboto_client()
     async with client_ctx as client:
-        # Patch datetime in retention threshold calculation or test direct execution
-        # We patch raw_data_retention_days to 0 days to purge everything, or 7 days with custom mock threshold
         with patch("config.settings.settings.raw_data_retention_days", 0):
-            deleted_count = await compact_s3.purge_expired_raw_data(client)
+            deleted_count = await compact_s3.purge_expired_raw_data(client, bucket_name="test-bucket")
 
         assert deleted_count == 2
         resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="raw-data/")
@@ -318,6 +314,3 @@ async def test_write_chunk_to_file(tmp_path):
     # Read back to verify
     table = pq.read_table(str(file_path))
     assert table.column("a").to_pylist() == [1, 2, 3]
-
-
-

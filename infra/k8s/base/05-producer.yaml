@@ -63,6 +63,16 @@ spec:
                 secretKeyRef:
                   name: scraping-secrets
                   key: DEFAULT_REGION_AWS
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: scraping-secrets
+                  key: POSTGRES_PASSWORD
           # Health Checks
           readinessProbe:
             httpGet:

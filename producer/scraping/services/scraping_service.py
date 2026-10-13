@@ -1,10 +1,11 @@
 from scraping.models import TaskModel
 from shared.logging import Logger
-from typing import List
-
+from typing import List, Optional
 from shared import SummaryBatchResponse, ScrapingTask, BatchResponse
 from scraping.models import BulkTaskRequest
 from infrastructure.task.base import TaskProducer
+from scraping.services.domain_policy_service import DomainPolicyService
+
 
 import asyncio
 from uuid import uuid4
@@ -13,9 +14,15 @@ log = Logger("Scraping Tasks Orchestrator")
 
 
 class ScrapingOrchestrator:
-    def __init__(self, adapter_static: TaskProducer, adapter_dynamic: TaskProducer):
+    def __init__(
+        self,
+        adapter_static: TaskProducer,
+        adapter_dynamic: TaskProducer,
+        domain_policy_service: Optional[DomainPolicyService] = None,
+    ):
         self.adapter_static = adapter_static
         self.adapter_dynamic = adapter_dynamic
+        self.domain_policy_service = domain_policy_service or DomainPolicyService()
         
         # Solo 20 lotes (200 URLs) volando simultáneamente para no saturar la red
         self._semaphore = asyncio.Semaphore(20)
@@ -30,6 +37,25 @@ class ScrapingOrchestrator:
     def _map_to_task(
         self, batch_id: str, task: TaskModel, request: BulkTaskRequest
     ) -> ScrapingTask:
+        # Resolver política de dominio
+        policy = self.domain_policy_service.get_policy(str(task.url))
+        
+        use_proxy = policy.default_use_proxy
+        respect_robots_txt = (
+            task.respect_robots_txt
+            if task.respect_robots_txt is not None
+            else policy.default_respect_robots_txt
+        )
+        rate_limit_per_second = policy.default_rate_limit
+
+        # Combinar cabeceras: prioridad absoluta a las cabeceras enviadas en la tarea
+        effective_headers = None
+        if policy.default_headers or task.headers:
+            effective_headers = {
+                **(policy.default_headers or {}),
+                **(task.headers or {}),
+            }
+
         return ScrapingTask(
             job_id=request.job_id,
             batch_id=batch_id,
@@ -40,7 +66,13 @@ class ScrapingOrchestrator:
             max_depth=task.max_depth,
             max_retries=task.max_retries,
             context=request.context,
+            headers=effective_headers,
+            use_proxy=use_proxy,
+            respect_robots_txt=respect_robots_txt,
+            rate_limit_per_second=rate_limit_per_second,
         )
+
+
 
     async def _process_in_parallel(
         self, tasks: List[TaskModel], request: BulkTaskRequest

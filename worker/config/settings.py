@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     playwright_max_tasks_per_browser: int = 25  # Recicla Chromium cada N tareas para liberar V8 Heap / RAM
     playwright_v8_max_old_space_size_mb: int = 512  # Límite máximo de Heap JS por pestaña Chromium en MB
 
+    # Redis (Rate Limiting distribuido y Caché robots.txt)
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    redis_db: int = 0
+
+
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(
         env_file=".env",

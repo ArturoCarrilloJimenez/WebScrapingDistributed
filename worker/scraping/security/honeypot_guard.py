@@ -1,5 +1,4 @@
 import re
-from typing import List, Optional
 from bs4 import Tag
 from playwright.async_api import Page, Locator
 from shared.logging import Logger
@@ -96,7 +95,7 @@ class HoneypotGuard:
             or self._is_invalid_anchor_link(node)
         )
 
-    def filter_static_elements(self, elements: List[Tag]) -> List[Tag]:
+    def filter_static_elements(self, elements: list[Tag]) -> list[Tag]:
         """Filtra una lista de nodos BeautifulSoup descartando activamente los Honeypots.
 
         Args:
@@ -111,7 +110,7 @@ class HoneypotGuard:
     # 🎭 ANÁLISIS DINÁMICO EN LOTE (Playwright Page & Locator)
     # ------------------------------------------------------------------
 
-    async def filter_playwright_locators_in_batch(self, page: Page, selector: str) -> List[Locator]:
+    async def filter_playwright_locators_in_batch(self, page: Page, selector: str) -> list[Locator]:
         """Evalúa en LOTE todos los elementos que coinciden con un selector en Chromium.
 
         Ejecuta 1 sola llamada JavaScript enviada al motor V8 de Chromium para analizar 
@@ -126,7 +125,7 @@ class HoneypotGuard:
         """
         try:
             # 1 Sola llamada enviada a Chromium para evaluar todos los elementos a la vez
-            valid_indices: List[int] = await page.evaluate("""(sel) => {
+            valid_indices: list[int] = await page.evaluate("""(sel) => {
                 const elements = Array.from(document.querySelectorAll(sel));
                 return elements
                     .map((el, index) => {

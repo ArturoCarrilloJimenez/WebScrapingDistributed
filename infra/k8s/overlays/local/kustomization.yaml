@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Hereda toda la arquitectura base
+resources:
+  - ../../base
+  # Recursos exclusivos de desarrollo local (Emulador Floci SQS + S3)
+  - 03-pvc-emulator.yaml
+  - 04-emulator-aws.yaml

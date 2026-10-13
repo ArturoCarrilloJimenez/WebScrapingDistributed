@@ -1,0 +1,37 @@
+{
+  "policies": [
+    {
+      "domain": "sec.gov",
+      "hard_rate_limit": 10.0,
+      "default_rate_limit": 8.0,
+      "default_use_proxy": false,
+      "default_respect_robots_txt": true,
+      "default_headers": {
+        "User-Agent": "WebScrapingDistributed research@domain.com",
+        "Accept-Encoding": "gzip, deflate"
+      },
+      "description": "SEC EDGAR: Limite estricto de 10 req/s, conexion directa sin proxy comercial y User-Agent obligatorio"
+    },
+    {
+      "domain": "data.sec.gov",
+      "hard_rate_limit": 10.0,
+      "default_rate_limit": 8.0,
+      "default_use_proxy": false,
+      "default_respect_robots_txt": true,
+      "default_headers": {
+        "User-Agent": "WebScrapingDistributed research@domain.com",
+        "Accept-Encoding": "gzip, deflate"
+      },
+      "description": "Subdominio de datos masivos y APIs JSON de la SEC EDGAR"
+    },
+    {
+      "domain": "default",
+      "hard_rate_limit": null,
+      "default_rate_limit": null,
+      "default_use_proxy": true,
+      "default_respect_robots_txt": true,
+      "default_headers": null,
+      "description": "Politica comodin para el resto de dominios comerciales generales"
+    }
+  ]
+}
