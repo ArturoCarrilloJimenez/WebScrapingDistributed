@@ -1,8 +1,8 @@
 # Shared — Biblioteca de Modelos y Utilidades Comunes
 
-Módulo centralizador de contratos de datos, validaciones contractuales y utilidades transversales que proporciona cohesión arquitectónica y desacoplamiento en el sistema de scraping distribuido.
+Módulo centralizador de contratos de datos, validaciones contractuales, políticas de gobernanza y utilidades transversales que proporciona cohesión arquitectónica y desacoplamiento en el sistema de scraping distribuido.
 
-Este paquete es compartido e integrado de forma nativa por el **Producer** (para validar en la ingesta) y el **Worker** (para procesar y extraer).
+Este paquete es compartido e integrado de forma nativa por el **Producer** (para validar en la ingesta y gestionar dominios) y el **Worker** (para procesar, validar robots.txt y aplicar rate limiting).
 
 ---
 
@@ -11,9 +11,10 @@ Este paquete es compartido e integrado de forma nativa por el **Producer** (para
 En sistemas distribuidos orientados a eventos, la **coherencia del contrato** es crítica. Si el productor envía un mensaje con una estructura que el consumidor no puede entender, el sistema falla de manera silenciosa.
 
 `shared` resuelve esto actuando como la **única fuente de verdad** (*Single Source of Truth*), garantizando que:
-1. Toda tarea de scraping que viaje por SQS cumpla estrictamente el mismo esquema validado por **Pydantic**.
-2. Las configuraciones dinámicas de extracción (como selectores CSS) se validan antes de entrar en la cola.
-3. El sistema de logging sea uniforme, estructurado en JSON para observabilidad en la nube y resistente a fallos de serialización.
+1. Toda tarea de scraping que viaje por SQS cumpla estrictamente el mismo esquema validado por **Pydantic V2**.
+2. Las políticas de gobernanza de dominios (`DomainPolicy`), rate limits estrictos y cumplimiento de `robots.txt` compartan contratos idénticos.
+3. Las configuraciones dinámicas de extracción (selectores CSS, `FieldSpec`) se validan antes de entrar en la cola.
+4. El sistema de logging sea uniforme, estructurado en JSON para observabilidad en la nube y resistente a fallos de serialización.
 
 ---
 
@@ -21,23 +22,26 @@ En sistemas distribuidos orientados a eventos, la **coherencia del contrato** es
 
 ```py
 shared/
-├── pyproject.toml              # Configuración de empaquetado (Hatchling) y dependencias
-├── README.md                   # Esta documentación
-└── shared/                     # Código fuente del paquete
-    ├── __init__.py             # Exportaciones públicas de modelos y utilidades
-    ├── logging.py              # Logger unificado, estructurado y resiliente
-    └──        ├── __init__.py
-        ├── scraping_task.py    # Modelo y contrato del mensaje SQS
-        ├── batch_task_response.py # Modelos de respuesta REST para lotes
-        ├── parse_type/         # Tipos y motores de scraping soportados
+├── pyproject.toml                  # Configuración de empaquetado (Hatchling) y dependencias
+├── README.md                       # Esta documentación
+└── shared/                         # Código fuente del paquete
+    ├── __init__.py                 # Exportaciones públicas de modelos y utilidades
+    ├── logging.py                  # Logger unificado, estructurado y resiliente
+    └── models/                     # Contratos de datos tipados (Pydantic V2)
+        ├── __init__.py
+        ├── scraping_task.py        # Modelo y contrato del mensaje SQS (ScrapingTask)
+        ├── batch_task_response.py  # Modelos de respuesta REST para lotes
+        ├── domain_policy.py        # Modelos DTO de Gobernanza de Dominios (CRUD)
+        ├── robots_status.py        # Enum de estados de evaluación de robots.txt
+        ├── parse_type/             # Tipos y motores de scraping soportados
         │   ├── __init__.py
-        │   └── enum.py         # Enum de ParserType (static_css, dynamic_playwright)
-        └── parse_config/       # Validación contractual y perezosa de motores
+        │   └── enum.py             # Enum de ParserType (static_css, dynamic_playwright)
+        └── parse_config/           # Validación contractual y perezosa de motores
             ├── __init__.py
-            ├── base.py         # Clase base inmutable (BaseParserConfig)
-            ├── factory.py      # Factory para carga perezosa de configuraciones
-            ├── validators.py   # Mixin interceptor de validación dinámica
-            ├── static_css.py   # Contrato específico del motor Static CSS
+            ├── base.py             # Clase base inmutable (BaseParserConfig, FieldSpec)
+            ├── factory.py          # Factory para carga perezosa de configuraciones
+            ├── validators.py       # Mixin interceptor de validación dinámica
+            ├── static_css.py       # Contrato específico del motor Static CSS
             └── dynamic_playwright.py # Contrato específico del motor Dynamic Playwright
 ```
 
@@ -64,18 +68,35 @@ from shared.models import ScrapingTask
 # - context: Metadatos extra que viajan con el mensaje (ej: ID de categoría).
 ```
 
-#### Respuestas REST por Lotes
-- **`BatchResponse`**: Retorna el identificador de lote (`batch_id`), un resumen agregador (`SummaryBatchResponse`) con el conteo de tareas enviadas/fallidas y el desglose de errores (`ErrorsBatchResponse`) si las URLs o configuraciones fallaron en la validación inicial.
+#### Gobernanza y Políticas de Dominio (`DomainPolicy`)
+Modelos para controlar la velocidad, uso de proxy y cumplimiento legal por cada dominio:
+
+* **`DomainPolicyBase`**: Validación de dominio normalizado (minúsculas, sin puertos) y coherencia entre `default_rate_limit` y `hard_rate_limit`.
+* **`DomainPolicyCreate` / `DomainPolicyUpdate`**: DTOs para la API REST del Producer con validaciones de rangos y campos opcionales.
+* **`DomainPolicy`**: Entidad persistible completa con marcas temporales UTC (`created_at`, `updated_at`).
+* **`RobotsStatus`**: Estados del evaluador normativo RFC 9309 (`BYPASS`, `ALLOWED`, `NOT_FOUND`, `DISALLOWED`).
+
+```python
+from shared.models import DomainPolicy, RobotsStatus
+
+# Ejemplo de política para SEC EDGAR
+policy = DomainPolicy(
+    domain="sec.gov",
+    hard_rate_limit=10.0,        # Límite infranqueable de 10 req/s exigido por la SEC
+    default_rate_limit=5.0,
+    default_use_proxy=False,     # IP directa limpia (coste 0€)
+    default_respect_robots_txt=True,
+    default_headers={"User-Agent": "MyResearchLab contact@lab.edu"}
+)
+```
 
 ---
 
 ### 2. Validación Dinámica de Contratos (Factory + Mixin)
 
-Uno de los diseños más avanzados del sistema es la validación dinámica en la ingesta. Cada motor de scraping requiere parámetros distintos:
+Cada motor de scraping requiere parámetros distintos:
 * `static_css`: requiere selectores CSS obligatorios (`selectors`).
 * `dynamic_playwright`: requiere selectores y parámetros de interacción opcionales (tales como `timeout_ms`, `wait_until`, `wait_for_selector`, `scroll_to_bottom`, `click_selectors`).
-
-Para validar esto sin acoplar los esquemas de forma rígida:
 
 ```mermaid
 graph TD
@@ -89,38 +110,15 @@ graph TD
 ```
 
 - **`BaseParserConfig`**: Define las reglas para los submódulos. Es inmutable (`frozen=True`) para proteger los hilos de ejecución concurrentes y no permite campos ajenos (`extra='forbid'`).
-- **`ContractFactory`**: Implementa **Carga Perezosa (Lazy Load)**. Lee el valor del `ParserType` e importa dinámicamente el submódulo de configuración correspondiente (ej. `dynamic_playwright.py`), extrayendo su clase `Config` en tiempo de ejecución.
-- **`ParserValidatedMixin`**: Mixin de Pydantic que intercepta la validación de `parser_config`. Si la validación contra el submódulo cargado falla, recopila el esquema esperado y lanza una excepción limpia (`invalid_parser_config`) que la API intercepta y devuelve de forma legible al usuario.
-
-#### Ejemplo de Contratos Específicos:
-* **`base.py`**:
-```python
-class FieldSpec(BaseModel):
-    selector: str
-    attribute: Optional[str] = None  # Atributo HTML a extraer (ej: 'href', 'src')
-    default: Optional[Any] = None
-    multiple: bool = False           # Retorna lista si es True dentro de un contenedor
-
-FieldDefinition = str | FieldSpec
-```
-* **`static_css.py`**:
-```python
-class Config(BaseParserConfig):
-    container: Optional[str] = None  # Contenedor padre opcional para colecciones
-    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
-```
-* **`dynamic_playwright.py`**:
-```python
-class Config(BaseParserConfig):
-    container: Optional[str] = None  # Contenedor padre opcional para colecciones
-    selectors: Dict[str, FieldDefinition] = Field(..., min_length=1)
-    timeout_ms: PositiveInt = Field(default=30000)
-    wait_until: str = Field(default="domcontentloaded")
-    wait_for_selector: Optional[str] = Field(default=None)
-    scroll_to_bottom: bool = Field(default=False)
-    click_selectors: Optional[List[str]] = Field(default=None)
-```
-
+- **`FieldSpec`**: Especificación granular de extracción:
+  ```python
+  class FieldSpec(BaseModel):
+      selector: str
+      attribute: str | None = None   # Atributo HTML a extraer (ej: 'href', 'src')
+      default: Any | None = None
+      multiple: bool = False         # Retorna lista si es True dentro de un contenedor
+  ```
+- **`ContractFactory`**: Implementa **Carga Perezosa (Lazy Load)**. Importa dinámicamente el submódulo correspondiente en tiempo de ejecución.
 
 ---
 
@@ -131,15 +129,13 @@ El sistema incluye una clase de logging altamente optimizada para desarrollo loc
 - **Formateado Coloreado (`StyleFormatter`)**: Muestra logs estructurados legibles con realce de colores ANSI según la severidad (`INFO`, `WARNING`, `ERROR`, `DEBUG`) en la terminal local.
 - **Contexto JSON Enriquecido**: Permite adjuntar diccionarios de metadatos a los mensajes de log de forma limpia:
   ```python
-  log.info("Tarea encolada con éxito", context={"task_id": "123", "priority": 5})
+  logger.info("Tarea encolada con éxito", context={"task_id": "123", "priority": 5})
   ```
-- **Tolerancia Extrema a Fallos**: El logger implementa un serializador universal (`_universal_serializer`) adaptado para serializar de manera segura objetos complejos, Pydantic, fechas, UUIDs y Decimales. Si ocurre un fallo crítico de serialización (por ejemplo, referencias circulares), el logger lo intercepta y escribe un log de emergencia, garantizando que **el microservicio nunca se caiga debido a un fallo en la fase de logueo**.
+- **Tolerancia Extrema a Fallos**: El logger implementa un serializador universal (`_universal_serializer`) adaptado para serializar de manera segura objetos complejos, Pydantic, fechas, UUIDs y Decimales sin provocar caídas del microservicio.
 
 ---
 
 ## 📥 Instalación en Desarrollo Local
-
-Este paquete está configurado como un módulo distribuible local. Para instalarlo o enlazarlo en tus microservicios locales:
 
 Con el gestor **uv** en la raíz del proyecto, las dependencias del workspace se sincronizan de forma automática en los entornos virtuales de los microservicios:
 
@@ -153,28 +149,3 @@ O si deseas forzar la reinstalación del paquete local shared:
 ```bash
 uv sync --reinstall-package shared
 ```
-
----
-
-## ➕ Cómo añadir un Nuevo Parser al Sistema
-
-Para expandir el sistema con un nuevo motor (ej. `llm_adaptive`):
-
-1. **Añadir el Tipo**: En `shared/shared/models/parse_type/enum.py`, agrega el nuevo valor al Enum:
-   ```python
-   class ParserType(str, Enum):
-       STATIC_CSS = "static_css"
-       DINAMIC_PLAYWRIGHT = "dynamic_playwright"
-       LLM_ADAPTIVE = "llm_adaptive"
-   ```
-2. **Crear su Contrato**: En `shared/shared/models/parse_config/`, crea un archivo que coincida exactamente con el valor del enum (ej. `llm_adaptive.py`):
-   ```python
-   # shared/shared/models/parse_config/llm_adaptive.py
-   from pydantic import Field
-   from .base import BaseParserConfig
-
-   class Config(BaseParserConfig):
-       prompt: str = Field(..., min_length=5)
-       model_name: str = Field(default="gemini-1.5-flash")
-   ```
-3. ¡Listo! La `ContractFactory` importará dinámicamente tu nuevo esquema y el Producer validará de forma inmediata las nuevas peticiones REST correspondientes a `llm_adaptive`.

@@ -1,12 +1,12 @@
-# Worker — Motor Concurrente de Extracción y Resiliencia
+# Worker — Motor Concurrente de Extracción, Gobernanza y Resiliencia
 
-El **Worker** es el núcleo de ejecución asíncrono y de alto rendimiento del sistema. Su única responsabilidad es consumir tareas de scraping de la cola SQS de manera eficiente, evadir bloqueos de red mediante rotación inteligente de proxies, extraer los datos requeridos utilizando motores de parseado modulares (`UniversalDOMExtractor`) y gestionar la tolerancia a fallos mediante estrategias adaptativas de reintentos y gestión activa de memoria RAM.
+El **Worker** es el núcleo de ejecución asíncrono y de alto rendimiento del sistema. Su responsabilidad es consumir tareas de scraping de Amazon SQS, garantizar el cumplimiento legal y normativo (**RFC 9309 robots.txt**), aplicar limitación de tasa distribuida (**Token Bucket en Redis**), evadir bloqueos de red mediante enrutamiento híbrido de proxies, extraer los datos estructurados con `UniversalDOMExtractor` y gestionar la tolerancia a fallos mediante backoff dinámico y drenado de RAM.
 
 ---
 
 ## 🏗️ Arquitectura del Motor de Ejecución
 
-El Worker está diseñado bajo un enfoque **no bloqueante y concurrente** utilizando el bucle de eventos de `asyncio` y clientes de red asíncronos (`httpx`, `curl_cffi` para peticiones estáticas impersonadas y `Playwright Chromium` para contenido dinámico).
+El Worker está diseñado bajo un enfoque **no bloqueante y concurrente** utilizando `asyncio` y clientes de red nativos (`curl_cffi` para peticiones estáticas impersonadas y `Playwright Chromium` para contenido dinámico SPA).
 
 ```mermaid
 graph TD
@@ -16,28 +16,32 @@ graph TD
     subgraph Procesamiento Concurrente de Tareas
         Semaphore -->|Sí| Task1[Task wrapper - Tarea 1]
         Semaphore -->|Sí| Task2[Task wrapper - Tarea 2]
-        Semaphore -->|Sí| TaskN[Task wrapper - Tarea N]
     end
 
-    Task1 -->|Proxy & network_client / Chromium| Web[Servidores Web Objetivo]
-    Web -->|HTML / Render JS| ParserFactory[ParserFactory]
+    subgraph Gobernanza de Dominio y Compliance Legal
+        Task1 --> RateLimiter[DomainRateLimiter - Token Bucket Redis]
+        RateLimiter --> Robots[RobotsCacheService - RFC 9309]
+        Robots -->|¿Bloqueado por robots.txt?| Skip[SKIPPED_ROBOTS_TXT -> ACK SQS]
+        Robots -->|Permitido| Routing{Enrutamiento Híbrido}
+        Routing -->|default_use_proxy: False| Direct[IP Directa Limpia - Coste 0€]
+        Routing -->|default_use_proxy: True| Proxy[Proxy Pool / Backconnect]
+    end
+
+    Direct --> Web[Servidor Web Objetivo]
+    Proxy --> Web
+
+    subgraph Capa Activa Anti-Bot & Extracción
+        Web --> Honeypot[HoneypotGuard: HTML static & JS Batch]
+        Honeypot --> ParserFactory[ParserFactory]
+        ParserFactory -->|static_css| StaticCSS[StaticCSSParser + UniversalDOMExtractor]
+        ParserFactory -->|dynamic_playwright| Playwright[DynamicParser + UniversalDOMExtractor]
+    end
+
+    StaticCSS --> BufferService[Buffer de Trabajos - JobBufferService]
+    Playwright --> BufferService
     
-    subgraph Capa Activa Anti-Bot
-        Honeypot[HoneypotGuard: HTML static & JS Batch]
-    end
-
-    subgraph Motores de Parseo Modulares
-        ParserFactory -->|parser_type: static_css| StaticCSS[StaticCSSParser + UniversalDOMExtractor]
-        ParserFactory -->|parser_type: dynamic_playwright| Playwright[DynamicParser + UniversalDOMExtractor]
-    end
-
-    StaticCSS -->|Filtro Honeypot| Honeypot
-    Playwright -->|Filtro Honeypot| Honeypot
-
-    Honeypot -->|ParseResult| BufferService[Buffer de Trabajos - JobBufferService]
-    
-    subgraph Data Lake y Persistencia
-        BufferService -->|3. Volcado masivo .jsonl| S3[(Amazon S3 - scraping-data-lake)]
+    subgraph Data Lake y Persistencia Escalonada
+        BufferService -->|3. Volcado masivo .jsonl| LandingZone[(MinIO / S3 Landing Zone)]
         BufferService -->|4. Confirmar Task| MemoryQueue[Cola en Memoria - ACK Queue]
     end
 
@@ -45,46 +49,36 @@ graph TD
     Flusher -->|DeleteMessageBatch| SQS
 ```
 
-### 1. Control de Concurrencia y Fetch Seguro
-Para optimizar el ancho de banda y la capacidad de CPU de la máquina host sin saturarla:
-- El motor utiliza un semáforo asíncrono (`asyncio.Semaphore`) configurado por `WORKER_NUM_MAX_CONCURRENT_TASKS`.
-- Solo realiza peticiones de lectura a SQS (`fetch`) cuando hay capacidad libre en el semáforo.
-- El tamaño del lote de lectura se adapta dinámicamente: solicita un número de mensajes equivalente a los slots libres del semáforo (con un tope de 10 mensajes), maximizando la tasa de procesamiento sin desperdiciar tiempos de visibilidad.
-- **Fetch Concurrente Seguro**: La clase `SQSAioBotoAdapter` utiliza `asyncio.gather` y espera a que todas las peticiones de descarga paralelas en el pool asíncrono terminen antes de procesarlas, previniendo fugas de visibilidad y cancelaciones abruptas de sockets.
-
 ---
 
-### 2. Protocolo de Apagado Seguro (Graceful Shutdown)
-El Worker está preparado para entornos elásticos de contenedores (como AWS ECS o Kubernetes) donde las instancias pueden crearse o destruirse bajo demanda. Captura las señales de terminación del sistema (`SIGINT` y `SIGTERM`) para realizar una desconexión controlada:
-1. Cambia el estado interno a `running = False` para **detener la recepción de nuevos mensajes de SQS**.
-2. **Espera a que todas las tareas de scraping en vuelo finalicen** su ejecución de forma limpia.
-3. Cierra el buffer de trabajos (`JobBufferService`), realizando un volcado síncrono de los datos almacenados en memoria (**drenado de RAM**) hacia S3 para todos los trabajos activos para prevenir la pérdida de datos volátiles.
-4. Encola las tareas correspondientes en la cola de borrado de SQS (`ack_queue`) y espera a que el flusher asíncrono de ACKs termine de vaciar la cola.
-5. Cierra las conexiones y sockets del cliente de almacenamiento (S3) y de SQS de forma limpia.
+## 🛡️ Gobernanza de Dominio, Rate Limiting y Compliance Legal
 
----
+El Worker incorpora mecanismos estrictos de cumplimiento legal y protección de infraestructura:
 
-### 3. Vaciado Asíncrono de ACKs (`_ack_flusher`)
-En lugar de emitir una petición de borrado de red a SQS por cada mensaje procesado con éxito, el Worker los deposita en un buffer en memoria (`asyncio.Queue`). Una tarea en segundo plano consume este buffer y elimina las tareas de SQS **en lotes optimizados de hasta 10 mensajes** (`acknowledge_batch`), reduciendo la latencia de red.
+### 1. Token Bucket Distribuido (`DomainRateLimiter`)
+- Implementa un limitador de tasa token bucket granular por dominio (`hard_rate_limit` y `default_rate_limit`).
+- **Estado Atómico en Redis**: Los contadores de tokens se coordinan de forma distribuida entre múltiples réplicas de workers en Redis mediante adaptadores pasivos (`RedisCacheAdapter`).
+- **Contingencia Local en RAM (`MemoryCacheAdapter`)**: Si Redis no está disponible o sufre una caída temporal, conmuta automáticamente a una caché en memoria local sin interrumpir el flujo de extracción ni violar las tasas límite.
 
----
+### 2. Cumplimiento Normativo RFC 9309 (`RobotsCacheService`)
+- Inspecciona de forma preventiva el archivo `robots.txt` del dominio antes de realizar cualquier extracción.
+- **Caché TTL de 24 horas**: Almacena el árbol de reglas en Redis para evitar peticiones repetitivas al servidor web de destino.
+- Si una URL está desautorizada explícitamente para el `User-Agent` del scraper, el Worker finaliza la tarea con estado `SKIPPED_ROBOTS_TXT`, registra el motivo y emite un ACK inmediato a SQS para no consumir recursos innecesarios.
 
-## 🛡️ Capa Activa de Seguridad Anti-Bot (`HoneypotGuard`)
-
-Para evitar trampas invisibles diseñadas para detectar scrapers, el microservicio integra la clase [`HoneypotGuard`](scraping/security/honeypot_guard.py), inyectada mediante el contenedor de dependencias (`dependencies.py`) y la factoría (`factory.py`):
-
-- **Análisis Estático (BeautifulSoup):** Evalúa e intercepta nodos `bs4.Tag` con reglas CSS de ocultación (`display:none`, `visibility:hidden`, `opacity:0`, `font-size:0`, `left:-9999px`, `width:0`), clases invisibles (`hidden`, `sr-only`, `d-none`), atributos `aria-hidden="true"`, `tabindex="-1"`, bloques `<noscript>` o enlaces vacíos/javascript.
-- **Análisis Dinámico Optimizado en Lote (Playwright):** Ejecuta **1 sola evaluación en lote mediante JavaScript en Chromium** (`page.evaluate`), analizando en C++/V8 todos los elementos de la página (`display`, `visibility`, `opacity`, `pointerEvents`, dimensiones `width/height > 1px`, coordenadas `x/y >= 0`) y devolviendo los locators seguros en **~15 milisegundos**.
+### 3. Enrutamiento Híbrido de Proxies
+- **Coste 0€ en Dominios Públicos / Institucionales**: Para orígenes regulados con APIs públicas o directrices abiertas (como la SEC EDGAR de EE.UU.), las peticiones se enrutan a través de la interfaz de red directa y limpia del worker (`default_use_proxy = False`), evitando el coste de proxies residenciales comerciales.
+- **Rotación Residencial / Sticky Sessions**: Para dominios protegidos, canaliza el tráfico a través de gateways residenciales (`backconnect`) o rotación en pool estático con afinidad por sesión (`sticky_session_id`).
 
 ---
 
 ## 🚀 Motor Dinámico Playwright & Gestión de Recursos V8
 
-El motor dinámico (`DynamicParser`) permite renderizar aplicaciones SPA y contenido JavaScript complejo garantizando estabilidad de memoria RAM:
+El motor dinámico (`DynamicParser`) permite renderizar aplicaciones SPA y JavaScript complejo garantizando estabilidad de memoria RAM:
 
 - **Reciclaje Automático por Contador de Tareas**: Tras procesar 25 tareas (`playwright_max_tasks_per_browser`), el Worker auto-destruye y reinicia el proceso Chromium de fondo, ejecutando `gc.collect()` para liberar fugas de memoria del motor V8.
 - **Límite Estricto V8 Heap (RAM)**: Inyecta banderas de arranque en Chromium (`--js-flags=--max-old-space-size=512`, `--disable-gpu`, `--disable-software-rasterizer`) limitando la RAM asignable por pestaña a **512 MB**.
-- **Coherencia de Client Hints**: Inyecta dinámicamente cabeceras de contexto (`Sec-Ch-Ua-Platform: "Windows"`) y versionado real de Chromium para eliminar inconsistencias entre el sistema operativo host del contenedor (Linux/Docker) y el navegador renderizado.
+- **Coherencia de Client Hints**: Inyecta dinámicamente cabeceras de contexto (`Sec-Ch-Ua-Platform: "Windows"`) y versionado real de Chromium para eliminar inconsistencias entre el sistema operativo host del contenedor y el navegador.
+- **Inspección Batch JS Honeypot**: Evalúa trampas HTML invisibles en Chromium ejecutando una única función JavaScript en V8 (`~15 ms`).
 
 ---
 
@@ -104,35 +98,25 @@ graph TD
     subgraph Estrategias de Tiempo de Espera
         Backoff -->|Timeout de Red| BT[Lineal Corto: 5s * retry]
         Backoff -->|Server Error 5xx| BE[Lineal Moderado: 15s * retry]
-        Backoff -->|Bloqueo Antibot| BB[Exponencial Agresivo con Jitter: 30s * 2^retry, max 300s]
+        Backoff -->|Bloqueo Antibot 403/429| BB[Exponencial Agresivo: 30s * 2^retry, max 300s]
     end
 ```
 
-- **Errores Fatales** (`ErrorCategory.NOT_FOUND` / `INVALID_SCHEMA`): Se consideran no recuperables. El Worker emite un ACK forzado de inmediato para eliminar el mensaje de la cola principal.
-- **Errores Recuperables** (`TIMEOUT`, `SERVER_ERROR` 5xx, `BLOCKED` antibot):
-  - Incrementan el contador interno de intentos (`retry_count`).
-  - Si superan `max_retries`, se eliminan de la cola principal (provocando el traspaso automático a la **DLQ**).
-  - Si aún quedan intentos, se modifica la visibilidad del mensaje en SQS mediante un latido (`visibility_timeout`):
-    - **Timeout de red**: Backoff lineal corto (`5s * retry`).
-    - **Fallo del servidor (5xx)**: Backoff lineal moderado (`15s * retry`).
-    - **Bloqueo / Antibot (`BLOCKED`)**: Backoff exponencial agresivo (`30s * 2^retry`, tope de 300s).
+- **Errores Fatales** (`NOT_FOUND`, `INVALID_SCHEMA`): Se consideran no recuperables. El Worker emite un ACK forzado de inmediato para eliminar el mensaje de la cola.
+- **Errores Recuperables** (`TIMEOUT`, `SERVER_ERROR`, `BLOCKED`):
+  - Modifican el tiempo de visibilidad en SQS según la severidad del fallo.
+  - Al superar `max_retries`, se descartan de la cola principal y se trasladan automáticamente a la Dead Letter Queue (DLQ).
 
 ---
 
-## 🌐 Sistema de Rotación y Gestión de Proxies
+## ⚙️ Protocolo de Apagado Seguro (Graceful Shutdown)
 
-El módulo de red (`BaseProxyProvider`) soporta dos modalidades de rotación:
-
-### A. Pool de Proxies Estáticos (`static_pool`)
-- Rota las peticiones de forma equilibrada a través de la lista `PROXY_STATIC_LIST`.
-- **Sticky Sessions**: Si la tarea incluye `sticky_session_id`, el sistema calcula un hash consistente y asocia siempre la tarea al mismo proxy del pool.
-
-### B. Gateway Residencial Rotativo (`backconnect`)
-- Canaliza el tráfico a través de un único endpoint configurado en `PROXY_URL`.
-- **Sticky Sessions**: Inyecta dinámicamente el identificador de sesión en las credenciales de autenticación del proxy.
-
-### C. Cierre Gracioso de Sesiones (Graceful Session Closure)
-- El `SecureNetworkClient` retira la sesión del pool y la cierra de forma asíncrona tras un periodo de gracia para no interrumpir peticiones en vuelo.
+El Worker captura señales del sistema operativo (`SIGINT`, `SIGTERM`) para garantizar cero pérdida de datos:
+1. Pone `running = False` para detener el polling de mensajes en SQS.
+2. Espera la finalización limpia de las tareas en vuelo vinculadas al semáforo.
+3. Ejecuta un **drenado de RAM a almacenamiento (`JobBufferService.flush()`)**, volcando los micro-lotes JSONL a la Landing Zone (MinIO / S3).
+4. Procesa y vacía la cola de confirmaciones de borrado de SQS (`_ack_flusher`) en lotes de hasta 10 mensajes.
+5. Cierra las conexiones activas de red y sockets de clientes.
 
 ---
 
@@ -142,22 +126,29 @@ El comportamiento del Worker se controla mediante `config/settings.py` alimentad
 
 | Variable | Tipo | Por Defecto | Descripción |
 | :--- | :--- | :--- | :--- |
-| `WORKER_NUM_MAX_CONCURRENT_TASKS` | `int` | `10` | Concurrencia máxima (Semáforo) por Worker |
-| `NUM_MAX_TASKS` | `int` | `10` | Lote máximo de borrado y fetch (límite SQS 10) |
+| **Concurrencia & SQS** | | | |
+| `WORKER_NUM_MAX_CONCURRENT_TASKS` | `int` | `10` | Concurrencia máxima (Semáforo) por réplica de Worker |
+| `NUM_MAX_TASKS` | `int` | `10` | Lote máximo de lectura y borrado en SQS (máx 10) |
+| `SQS_ENDPOINT_URL` | `str` | `http://localhost:4566` | Endpoint del broker SQS (LocalStack / Floci / AWS) |
+| `SQS_QUEUE_URL` | `str` | `...` | URL física de la cola SQS consumida (estática o dinámica) |
 | `DEFAULT_REGION_AWS` | `str` | `us-east-1` | Región AWS por defecto del sistema |
-| `SQS_ENDPOINT_URL` | `str` | `http://localhost:9324` | Endpoint del broker SQS |
-| `SQS_QUEUE_URL` | `str` | `...` | URL física de la cola SQS consumida (estática/dinámica) |
-| `SQS_REGION` | `str` | `us-east-1` | Región AWS de la cola SQS |
-| `S3_ENDPOINT_URL` | `str` | `http://localhost:9000` | Endpoint de S3 Data Lake |
+| **Landing Zone de Almacenamiento (MinIO / S3)** | | | |
+| `S3_ENDPOINT_URL` | `str` | `http://localhost:9000` | Endpoint de la Landing Zone de almacenamiento |
 | `S3_BUCKET_NAME` | `str` | `scraping-data-lake` | Nombre del bucket destino (Data Sink) |
-| `S3_PREFIX_RAW_DATA` | `str` | `raw-data` | Prefijo virtual de S3 para datos crudos |
-| `S3_REGION` | `str` | `us-east-1` | Región AWS de S3 |
+| `S3_PREFIX_RAW_DATA` | `str` | `raw-data` | Prefijo virtual de S3 para datos crudos JSONL |
+| **Gobernanza & Redis** | | | |
+| `REDIS_HOST` | `str` | `localhost` | Host de Redis para Token Bucket y caché de robots.txt |
+| `REDIS_PORT` | `int` | `6379` | Puerto de conexión a Redis |
+| `REDIS_PASSWORD` | `str` | `""` | Contraseña opcional de Redis |
+| `REDIS_DB` | `int` | `0` | Base de datos lógica de Redis |
+| **Renderizado Dinámico Playwright** | | | |
 | `PLAYWRIGHT_MAX_TASKS_PER_BROWSER` | `int` | `25` | Reciclaje automático de Chromium cada N tareas procesadas |
 | `PLAYWRIGHT_V8_MAX_OLD_SPACE_SIZE_MB` | `int` | `512` | Límite máximo de Heap JS por pestaña Chromium en MB |
+| **Proxies de Red** | | | |
 | `PROXY_ENABLED` | `bool` | `False` | Activa/Desactiva el uso de proxies de red |
 | `PROXY_MODE` | `str` | `static_pool` | Modo de proxies (`static_pool` o `backconnect`) |
 | `PROXY_STATIC_LIST` | `str` | `""` | Lista de proxies estáticos separados por comas |
-| `PROXY_URL` | `str` | `""` | Dirección completa del proxy backconnect residencial |
+| `PROXY_URL` | `str` | `""` | Dirección completa del gateway backconnect residencial |
 
 ---
 
@@ -174,13 +165,14 @@ Para arrancar el consumidor de colas estáticas:
 ```bash
 SQS_QUEUE_URL=http://localhost:4566/000000000000/scraping-tasks-static uv run python main.py
 ```
+
 Para arrancar el consumidor de colas dinámicas (Playwright):
 ```bash
 SQS_QUEUE_URL=http://localhost:4566/000000000000/scraping-tasks-dynamic uv run python main.py
 ```
 
 ### 3. Ejecutar la Suite de Pruebas
-El Worker incluye **76 pruebas unitarias e integración asíncronas**:
+El Worker incluye **84 pruebas unitarias e integradas asíncronas** con simulación completa de SQS, S3 (Moto), Redis, robots.txt y motores de parseo:
 ```bash
 uv run pytest
 ```

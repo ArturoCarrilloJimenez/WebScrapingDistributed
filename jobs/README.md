@@ -12,13 +12,13 @@ Cualquier nuevo script batch debe colocarse en la raíz de este módulo y defini
 
 ```text
 jobs/
-├── config/              # Parámetros y variables de entorno globales
+├── config/              # Parámetros y variables de entorno globales (Dual S3 clients)
 ├── interfaces/          # Modelos de validación (Pydantic) específicos de cada job
-├── test/                # Suite de pruebas unitarias e integración de los jobs
+├── test/                # Suite de pruebas unitarias e integración de los jobs (10 tests)
 ├── Dockerfile           # Imagen Docker ligera dedicada para ejecución de Jobs en Kubernetes
 ├── pyproject.toml       # Dependencias y configuración de uv para el paquete jobs
 ├── README.md            # Documentación general y catálogo de jobs
-└── compact_s3.py        # [Job] Compactador de Data Lake (Primer job activo)
+└── compact_s3.py        # [Job] Compactador de Data Lake con Almacenamiento Escalonado
 ```
 
 ---
@@ -27,68 +27,79 @@ jobs/
 
 ---
 
-### 1. Compactador de Data Lake (`compact_s3.py`)
+### 1. Compactador de Data Lake con Almacenamiento Escalonado (`compact_s3.py`)
 
-Este job es responsable de mitigar el **problema de los archivos pequeños** (*Small Files Problem*). Consolida los ficheros JSON Lines de la Landing Zone en S3, transformándolos a formato columnar estructurado de alta densidad (**Parquet**) con compresión **ZSTD**.
+Este job es responsable de mitigar el **problema de los archivos pequeños** (*Small Files Problem*) mediante una arquitectura de **Almacenamiento Escalonado (Tiered Storage)**. 
 
-#### 🏗️ Arquitectura del Job de Compactación
-El proceso se ejecuta de manera asíncrona concurrente con `asyncio` y un pool de hilos nativos para la escritura de chunks a disco local:
+Consolida los micro-ficheros JSON Lines generados por los workers en la Landing Zone local de **MinIO** (a coste 0€ en VPS Hetzner o clúster K8s), los transforma a formato columnar estructurado de alta densidad (**Apache Parquet**) con compresión **ZSTD** y los sube mediante multipart stream al Data Lake analítico destino (**AWS S3** o bucket centralizado). Tras confirmar la persistencia exitosa del Parquet, ejecuta un purgado atómico (*Delete-on-Success*) sobre MinIO para mantener el uso de disco del VPS acotado.
+
+#### 🏗️ Arquitectura Dual-Target del Job de Compactación
+
+El proceso se ejecuta de manera asíncrona concurrente con `asyncio` utilizando clientes independientes para la zona cruda de entrada (`raw_client`) y la zona analítica de salida (`target_client`):
 
 ```mermaid
 graph TD
-    LandingZone[(S3 Landing Zone - raw-data/)] -->|1. List prefixes| Discovery[Descubrimiento de Carpetas]
-    Discovery -->|2. Concurrencia Limitada| Metadata[Análisis de Metadatos y Tamaños]
-    Metadata -->|3. Evaluar Umbrales| Criteria{¿>= 300MB o 30m Inactivo?}
+    LandingZone[(MinIO Local Landing Zone - raw-data/)] -->|1. List prefixes / jobs| Discovery[Descubrimiento de Trabajos]
+    Discovery -->|2. Concurrencia Limitada| Metadata[Análisis de Metadatos y Partes]
+    Metadata -->|3. Descarga en streaming| Stream[Lectura asíncrona raw_client]
     
-    Criteria -->|No| Ignore[Ignorar Job]
-    Criteria -->|Sí| Compactor[Motor de Compactación - process_job]
-    
-    subgraph Ciclo de Vida de la Compactación
-        Compactor -->|4. Descarga asíncrona| Stream[Stream get_object]
-        Stream -->|5. Validación| Validate[ParseResult Pydantic V2]
-        Validate -->|6. Micro-Búfer RAM| Buffer[Acumular 20,000 registros]
-        Buffer -->|7. Escribir Chunk local| WriteChunk[Stampar en Disco Local - pq.ParquetWriter]
-        WriteChunk -->|8. Monitorear Peso| SizeCheck{¿Tamaño disco >= 250 MB?}
-        
+    subgraph Ciclo de Vida de Compactación en Streaming
+        Stream -->|4. Validación de Contrato| Validate[ParseResult Pydantic V2]
+        Validate -->|5. Micro-Búfer en RAM| Buffer[Acumular lotes de registros]
+        Buffer -->|6. Volcado a disco local| WriteChunk[pq.ParquetWriter - Chunks binarios]
+        WriteChunk -->|7. Monitoreo de peso| SizeCheck{¿Tamaño disco >= 250 MB?}
         SizeCheck -->|No - Continuar| Stream
-        SizeCheck -->|Sí - Rotación| Flush[Cerrar Escritor & Iniciar Parte N+1]
+        SizeCheck -->|Sí - Rotación| Rotate[Cerrar Writer & Iniciar Parte N+1]
     end
     
-    Flush -->|9. Subida PUT en Streaming| CompactedZone[(S3 Compacted Zone - compacted-data/)]
-    CompactedZone -->|10. Confirmar Persistencia| Cleaner[Limpieza Landing Zone]
-    Cleaner -->|11. Borrado Masivo S3| LandingZone
+    Rotate -->|8. Subida Multipart Stream target_client| AnalyticalLake[(AWS S3 Analytical Lake - compacted-data/)]
+    SizeCheck -->|Fin del stream| AnalyticalLake
+    
+    AnalyticalLake -->|9. Confirmación de Subida| Verify[Verificación de Persistencia]
+    Verify -->|10. Purgado atómico| LandingZone
 ```
 
 #### 🚀 Características Clave del Job
-* **Escritura Incremental en Disco Local (RAM Plana)**: En lugar de cargar todo el dataset (hasta 1M de registros) en listas nativas de Python (Heap Inflation), el job escribe bloques binarios de **20,000 registros** a disco local temporalmente usando `pq.ParquetWriter`. Esto mantiene el consumo de RAM constante por debajo de los **60 MB** independientemente de si procesa 50,000 o 10,000,000 de filas.
-* **Corte por Tamaño de Archivo Real**: El script monitorea el tamaño físico del archivo binario Parquet en disco (`os.path.getsize()`). Cuando cruza los **250 MB**, cierra el escritor y lo sube asíncronamente a S3 como la *Parte N*, abriendo un nuevo archivo temporal local para continuar. Esto garantiza archivos balanceados y óptimos para consultas SQL en el Data Lake.
-* **Subida por Stream (Zero Heap Upload)**: Al subir los archivos Parquet a S3 mediante `aioboto3.client.put_object(Body=file_object)`, el payload se transmite por red en bloques directamente desde el disco sin cargarse por completo en la memoria virtual de Python.
-* **Esquema Resiliente Columnar**: Estructura las consultas mediante tipado fuerte en las columnas de control analítico, pero empaqueta el contenido útil polimórfico en una columna `data` de tipo cadena JSON para prevenir roturas ante cambios en los campos extraídos de la web.
+* **Arquitectura de Doble Factoría S3 (`RAW_S3_*` vs `TARGET_S3_*`)**: Desacopla por completo el almacenamiento local de ingestión rápida (MinIO) del almacenamiento analítico de largo plazo (AWS S3), eliminando el 100% de las transacciones API Tier 1 en AWS S3 causadas por las escrituras frecuentes de los workers.
+* **Política Delete-on-Success (`delete_raw_after_compaction`)**: Los fragmentos JSONL solo se eliminan de MinIO una vez que el archivo Parquet ha sido validado y persistido en AWS S3, garantizando tolerancia total a fallos sin pérdida de datos.
+* **Escritura Incremental en Disco Local (RAM Plana)**: En lugar de cargar millones de registros en memoria virtual de Python (Heap Inflation), el job escribe bloques binarios de registros a disco temporal usando `pq.ParquetWriter`. Esto mantiene el consumo de RAM constante por debajo de los **60 MB** independientemente del volumen total procesado.
+* **Corte por Tamaño de Archivo Real**: El script monitorea el tamaño físico del archivo binario Parquet en disco (`os.path.getsize()`). Cuando cruza los **250 MB**, cierra el escritor y lo sube asíncronamente como la *Parte N*, abriendo un nuevo archivo temporal local para continuar.
+* **Subida por Stream (Zero Heap Upload)**: Al subir los archivos Parquet mediante `target_client.put_object(Body=file_object)`, el payload se transmite directamente desde el disco sin saturar la memoria RAM.
+* **Esquema Resiliente Columnar**: Estructura las consultas mediante tipado fuerte en las columnas de control analítico (`task_id`, `job_id`, `url`, `scraped_at`), y empaqueta el contenido útil polimórfico en una columna `data` de tipo cadena JSON para prevenir roturas ante cambios en los campos extraídos de la web.
 
 ---
 
 ### 2. [Futuros Jobs] (Mantenimiento, Backups, Cargas ETL, etc.)
 Para añadir un nuevo Job:
 1. Crea tu archivo script en la raíz de `jobs/` (ej. `limpieza_temporales.py`).
-2. Agrega las configuraciones necesarias en [jobs/config/settings.py](config/settings.py).
+2. Agrega las configuraciones necesarias en [`jobs/config/settings.py`](config/settings.py).
 3. Añade su descripción técnica y su flujo en este catálogo para mantener la visibilidad arquitectónica del sistema.
 
 ---
 
 ## ⚙️ Configuración y Variables de Entorno Globales
 
-El módulo comparte un objeto centralizado de configuración mediante `jobs/config/settings.py` alimentado por el archivo `.env` en su raíz:
+El módulo comparte un objeto centralizado de configuración mediante `jobs/config/settings.py` alimentado por el archivo `.env`:
 
 | Variable | Tipo | Por Defecto | Descripción |
 | :--- | :--- | :--- | :--- |
-| `S3_ENDPOINT_URL` | String | `http://localhost:4566` | Endpoint del almacenamiento de objetos S3. |
-| `S3_BUCKET_NAME` | String | `scraping-data-lake` | Nombre del bucket del Data Lake. |
-| `S3_PREFIX_RAW_DATA` | String | `raw-data` | Carpeta virtual de la Landing Zone de entrada. |
-| `S3_PREFIX_COMPACTED_DATA` | String | `compacted-data` | Carpeta virtual de destino para datos compactados Parquet. |
-| `RAW_DATA_RETENTION_DAYS` | Integer | `7` | Días de retención TTL de los datos crudos JSONL antes de su purga. |
-| `AWS_ACCESS_KEY_ID` | String | `test` | Clave de acceso de AWS. |
-| `AWS_SECRET_ACCESS_KEY` | String | `test` | Clave secreta de acceso de AWS. |
-| `DEFAULT_REGION_AWS` | String | `us-east-1` | Región por defecto de AWS. |
+| **Origen Crudo (Landing Zone - MinIO Local)** | | | |
+| `RAW_S3_ENDPOINT_URL` | String | `http://localhost:4566` | Endpoint de la Landing Zone de entrada (MinIO / Emulador local). |
+| `RAW_S3_BUCKET_NAME` | String | `scraping-data-lake` | Nombre del bucket de entrada para archivos JSONL. |
+| `RAW_S3_REGION` | String | `us-east-1` | Región del servicio S3 crudo. |
+| `RAW_AWS_ACCESS_KEY_ID` | String | `test` | Credencial de acceso a MinIO / Landing Zone. |
+| `RAW_AWS_SECRET_ACCESS_KEY` | String | `test` | Credencial secreta de acceso a MinIO / Landing Zone. |
+| **Destino Analítico (Analytical Lake - AWS S3)** | | | |
+| `TARGET_S3_ENDPOINT_URL` | String | `http://localhost:4566` | Endpoint del Data Lake analítico de destino (AWS S3 Cloud o emulador). |
+| `TARGET_S3_BUCKET_NAME` | String | `scraping-data-lake` | Nombre del bucket analítico de destino. |
+| `TARGET_S3_REGION` | String | `us-east-1` | Región del Data Lake analítico de destino. |
+| `TARGET_AWS_ACCESS_KEY_ID` | String | `test` | Credencial de acceso para AWS S3 destino. |
+| `TARGET_AWS_SECRET_ACCESS_KEY` | String | `test` | Credencial secreta de acceso para AWS S3 destino. |
+| **Gestión de Ciclo de Vida y Prefijos** | | | |
+| `S3_PREFIX_RAW_DATA` | String | `raw-data` | Prefijo virtual de entrada para fragmentos crudos. |
+| `S3_PREFIX_COMPACTED_DATA` | String | `compacted-data` | Prefijo virtual de destino para datasets Parquet ZSTD. |
+| `DELETE_RAW_AFTER_COMPACTION` | Boolean | `True` | Si es `True`, purga de MinIO los fragmentos JSONL tras subida exitosa del Parquet. |
+| `RAW_DATA_RETENTION_DAYS` | Integer | `7` | Días de retención TTL de contingencia para datos crudos. |
 
 ---
 
@@ -109,15 +120,12 @@ Los jobs se invocan de forma independiente desde su raíz usando el gestor de de
 ```bash
 # Lanzar el compactador de S3 localmente
 uv run compact_s3.py
-
-# Lanzar futuros jobs (ejemplo)
-uv run limpieza_temporales.py
 ```
 
 ### 3. Batería de Pruebas Integradas
-Las pruebas se localizan en `jobs/test/` y simulan la infraestructura AWS usando un servidor HTTP local de Moto en memoria para aislamiento absoluto:
+Las pruebas se localizan en `jobs/test/` y simulan la infraestructura AWS usando `ThreadedMotoServer` en memoria para persistencia de sockets y aislamiento absoluto:
 ```bash
-# Ejecutar todos los tests del módulo
+# Ejecutar los 10 tests del módulo
 uv run pytest
 
 # Inspeccionar reporte de cobertura de código
