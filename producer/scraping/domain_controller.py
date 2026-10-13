@@ -1,6 +1,5 @@
 from typing import Annotated
-from anyio import Path
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 
 from shared.models.domain_policy import (
     DomainPolicy,
@@ -35,7 +34,7 @@ async def list_domain_policies(
     summary="Obtener la politica de un dominio especifico",
 )
 async def get_domain_policy(
-    domain: str,
+    domain: Annotated[str, Path(pattern=DOMAIN_REGEX, description="Nombre de dominio válido")],
     service: Annotated[DomainPolicyService, Depends(get_domain_policy_service)],
 ) -> DomainPolicy:
     policy = service.get_policy_by_name(domain)
@@ -53,7 +52,7 @@ async def get_domain_policy(
     summary="Crear o actualizar la politica de un dominio en caliente",
 )
 async def upsert_domain_policy(
-    domain: str,
+    domain: Annotated[str, Path(pattern=DOMAIN_REGEX, description="Nombre de dominio válido")],
     policy_data: DomainPolicyCreate,
     service: Annotated[DomainPolicyService, Depends(get_domain_policy_service)],
 ) -> DomainPolicy:
