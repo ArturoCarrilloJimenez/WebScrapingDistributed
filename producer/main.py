@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import APIRouter, FastAPI
@@ -12,8 +11,9 @@ from dependencies.dependencies import (
 from scraping.controller import routesScrapingTasks
 from scraping.domain_controller import domain_router
 from config.settings import settings
+from shared.logging import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 
 async def _background_db_health_and_sync(interval_seconds: float = 30.0):
@@ -37,8 +37,6 @@ async def _background_db_health_and_sync(interval_seconds: float = 30.0):
             else:
                 # Sincronizacion periodica para capturar inserciones directas en BD
                 await service.sync_from_db()
-        except asyncio.CancelledError:
-            break
         except Exception as e:
             logger.debug("Error en ciclo de background sync con PostgreSQL: %s", e)
 

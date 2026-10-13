@@ -8,8 +8,8 @@ K8S_DIR="$SCRIPT_DIR/../infra/k8s"
 DB_DIR="$SCRIPT_DIR/../infra/db"
 OVERLAY_DIR="$K8S_DIR/overlays/$ENVIRONMENT"
 
-if [ ! -d "$OVERLAY_DIR" ]; then
-    echo "❌ Error: El entorno '$ENVIRONMENT' no existe. Opciones validas: local, prod"
+if [[ ! -d "$OVERLAY_DIR" ]]; then
+    echo "❌ Error: El entorno '$ENVIRONMENT' no existe. Opciones validas: local, prod" >&2
     exit 1
 fi
 

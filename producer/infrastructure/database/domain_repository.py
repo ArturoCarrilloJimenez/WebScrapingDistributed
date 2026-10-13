@@ -1,5 +1,4 @@
 import json
-import logging
 from abc import ABC, abstractmethod
 from typing import Optional
 from datetime import datetime, timezone
@@ -7,7 +6,9 @@ import asyncpg
 
 from shared import DomainPolicy
 
-logger = logging.getLogger(__name__)
+from shared.logging import Logger
+
+logger = Logger(__name__)
 
 
 class DomainPolicyRepositoryInterface(ABC):

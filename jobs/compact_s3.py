@@ -126,42 +126,33 @@ async def get_list_of_batches(
     bucket_name: str | None = None
 ) -> ListOfJobs:
     bucket = bucket_name or settings.effective_raw_bucket_name
+
     async with semaphore:
         try:
             paginator = client.get_paginator('list_objects_v2')
             total_tasks = 0
             total_bytes = 0
-            last_modified = None
+            task_dates = []
             uncompacted_batches = []
 
             async for page in paginator.paginate(Bucket=bucket, Prefix=job_prefix):
-                contents = page.get('Contents', [])
-                for batch in contents:
-                    if batch['Key'] == job_prefix:
-                        continue
-                    
-                    is_compacted = await _is_batch_compacted(client, batch['Key'], bucket_name=bucket)
-                    if is_compacted:
+                for batch in page.get('Contents', []):
+                    key = batch['Key']
+                    if key == job_prefix or await _is_batch_compacted(client, key, bucket_name=bucket):
                         continue
 
                     total_tasks += 1
                     total_bytes += batch['Size']
-                    task_date = batch['LastModified']
-
-                    if last_modified is None or task_date > last_modified:
-                        last_modified = task_date
+                    task_dates.append(batch['LastModified'])
 
                     mapped = _map_keys(batch)
                     mapped.is_compacted = False
                     uncompacted_batches.append(mapped)
 
-            if last_modified is None:
-                last_modified = datetime.datetime.now(datetime.timezone.utc)
-
             now_utc = datetime.datetime.now(datetime.timezone.utc)
+            last_modified = max(task_dates) if task_dates else now_utc
             if last_modified.tzinfo is None:
-                last_modified = last_modified.replace(
-                    tzinfo=datetime.timezone.utc)
+                last_modified = last_modified.replace(tzinfo=datetime.timezone.utc)
 
             return ListOfJobs(
                 prefix=job_prefix,
@@ -169,11 +160,13 @@ async def get_list_of_batches(
                 total_bytes=total_bytes,
                 last_modified=last_modified,
                 inactive_time=now_utc - last_modified,
-                batches=uncompacted_batches
+                batches=uncompacted_batches,
             )
+
         except Exception as e:
             log.error(
-                f"Error crítico al procesar metadatos del Job {job_prefix} en {bucket}: {e}")
+                f"Error crítico al procesar metadatos del Job {job_prefix} en {bucket}: {e}"
+            )
             raise
 
 
@@ -426,7 +419,8 @@ async def process_job(
     async with compaction_semaphore:
         if not _is_job_eligible(job):
             log.info(
-                f"Ignorando Job {job.prefix} | No cumple umbrales mínimos de tamaño o inactividad.")
+                f"Ignorando Job {job.prefix} | No cumple umbrales mínimos de tamaño o inactividad."
+            )
             return None
 
         job_id = job.prefix.rstrip("/").split("/")[-1].split("=")[-1]
@@ -434,7 +428,9 @@ async def process_job(
         compactor = JobCompactor(source_client, target_client, job, schema, job_id, target_bucket=target_b)
 
         try:
-            log.info(f"Iniciando compactación incremental en disco de Job: {job.prefix} (Origen: {source_b} -> Destino: {target_b})")
+            log.info(
+                f"Iniciando compactación incremental en disco de Job: {job.prefix} (Origen: {source_b} -> Destino: {target_b})"
+            )
 
             for b_idx, batch in enumerate(job.batches):
                 response = await source_client.get_object(Bucket=source_b, Key=batch.key)
@@ -465,14 +461,15 @@ async def process_job(
                 compactor.clean_local_file()
                 return None
 
-            # Estrategia de gestión de disco local (Delete-on-Success vs Tagging)
+            # Estrategia de gestión post-compactación sin bloque 'else' (ahorra complejidad)
             if settings.delete_raw_after_compaction:
                 await clear_job(source_client, job, bucket_name=source_b)
                 log.info(f"Purga Delete-on-Success completada para Job [{job_id}] en [{source_b}]. Disco local liberado.")
-            else:
-                await tag_batches_as_compacted(source_client, job.batches, bucket_name=source_b)
-                log.info(f"Lotes de Job [{job_id}] etiquetados con compacted=true en [{source_b}].")
+                log.info(f"Job {job_id} consolidado globalmente con éxito en {compactor.part_counter} parte(s) Parquet ZSTD.")
+                return job
 
+            await tag_batches_as_compacted(source_client, job.batches, bucket_name=source_b)
+            log.info(f"Lotes de Job [{job_id}] etiquetados con compacted=true en [{source_b}].")
             log.info(f"Job {job_id} consolidado globalmente con éxito en {compactor.part_counter} parte(s) Parquet ZSTD.")
             return job
 

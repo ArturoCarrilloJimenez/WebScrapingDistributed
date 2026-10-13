@@ -13,6 +13,8 @@ from scraping.interfaces.interfaces import ParseResult
 from infrastructure.network.client import SecureNetworkClient
 from scraping.exceptions import ErrorCategory, ScrapingError
 from shared.models.parse_config.dynamic_playwright import Config as PlaywrightConfig
+
+from shared.logging import Logger
 from .extractor import UniversalDOMExtractor
 
 
@@ -58,8 +60,7 @@ class DynamicParser(BaseParser):
         async with cls._lock:
             # Reciclar el navegador si superó el umbral de tareas configurado para evitar fugas de V8/RAM
             if cls._browser and cls._tasks_processed_count >= settings.playwright_max_tasks_per_browser:
-                import logging
-                log = logging.getLogger("DynamicParser")
+                log = Logger("DynamicParser")
                 log.info(
                     f"Reciclando instancia de Chromium tras {cls._tasks_processed_count} tareas procesadas (Límite: {settings.playwright_max_tasks_per_browser}) para liberar memoria RAM/V8."
                 )

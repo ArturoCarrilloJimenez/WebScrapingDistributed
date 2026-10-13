@@ -1,4 +1,3 @@
-import logging
 from typing import Optional
 from urllib.parse import urlparse
 from datetime import datetime, timezone
@@ -10,8 +9,9 @@ from shared import (
     load_seed_domain_policies,
 )
 from infrastructure.database.domain_repository import DomainPolicyRepositoryInterface
+from shared.logging import Logger
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 
 class DomainPolicyService:

@@ -1,4 +1,5 @@
 from typing import Annotated
+from anyio import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from shared.models.domain_policy import (
@@ -14,6 +15,7 @@ domain_router = APIRouter(
     tags=["Gobernanza y Cumplimiento Normativo por Dominio"],
 )
 
+DOMAIN_REGEX = r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
 
 @domain_router.get(
     "",
@@ -65,7 +67,7 @@ async def upsert_domain_policy(
     summary="Eliminar una politica de dominio",
 )
 async def delete_domain_policy(
-    domain: str,
+    domain: Annotated[str, Path(pattern=DOMAIN_REGEX, description="Nombre de dominio válido")],
     service: Annotated[DomainPolicyService, Depends(get_domain_policy_service)],
 ) -> None:
     clean_domain = domain.strip().lower()

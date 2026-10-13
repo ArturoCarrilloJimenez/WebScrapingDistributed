@@ -1,10 +1,10 @@
 import asyncio
-import logging
+from shared.logging import Logger
 from typing import Optional
 import asyncpg
 from config.settings import Settings
 
-logger = logging.getLogger(__name__)
+logger = Logger(__name__)
 
 
 class DatabaseConnectionManager:
