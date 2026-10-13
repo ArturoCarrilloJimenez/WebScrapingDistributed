@@ -42,8 +42,7 @@ class DomainPolicyService:
         for policy in policies_to_load:
             self._policies[policy.domain.lower()] = policy
         logger.info(
-            "DomainPolicyService inicializado con %d politicas de dominio en memoria",
-            len(self._policies),
+            f"DomainPolicyService inicializado con {len(self._policies)} politicas de dominio en memoria"
         )
 
     async def sync_from_db(self) -> None:
@@ -59,13 +58,11 @@ class DomainPolicyService:
             for policy in db_policies:
                 self._policies[policy.domain.lower()] = policy
             logger.info(
-                "Cache L1 de DomainPolicyService sincronizada con PostgreSQL (%d politicas en total)",
-                len(self._policies),
+                f"Cache L1 de DomainPolicyService sincronizada con PostgreSQL ({len(self._policies)} politicas en total)"
             )
         except Exception as e:
             logger.warning(
-                "Error durante la sincronizacion inicial con PostgreSQL: %s. Manteniendo politicas en memoria.",
-                e,
+                f"Error durante la sincronizacion inicial con PostgreSQL: {e}. Manteniendo politicas en memoria."
             )
 
     def extract_domain_from_url(self, url_or_host: str) -> str:
@@ -154,9 +151,7 @@ class DomainPolicyService:
                 return saved
             except Exception as e:
                 logger.error(
-                    "Error al persistir politica '%s' en PostgreSQL: %s. Operando en memoria.",
-                    clean_domain,
-                    e,
+                    f"Error al persistir politica '{clean_domain}' en PostgreSQL: {e}. Operando en memoria."
                 )
 
         return target_policy
@@ -178,9 +173,7 @@ class DomainPolicyService:
                 await self._repository.delete(clean_domain)
             except Exception as e:
                 logger.error(
-                    "Error al eliminar politica '%s' de PostgreSQL: %s",
-                    clean_domain,
-                    e,
+                    f"Error al eliminar politica '{clean_domain}' de PostgreSQL: {e}"
                 )
 
         return found

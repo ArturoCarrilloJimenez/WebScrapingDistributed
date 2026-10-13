@@ -37,29 +37,18 @@ class DatabaseConnectionManager:
                     command_timeout=10,
                 )
                 logger.info(
-                    "Pool de conexiones a PostgreSQL inicializado con exito en %s:%d/%s (intento %d/%d)",
-                    self._settings.postgres_host,
-                    self._settings.postgres_port,
-                    self._settings.postgres_db,
-                    attempt,
-                    max_retries,
+                    f"Pool de conexiones a PostgreSQL inicializado con exito en {self._settings.postgres_host}:{self._settings.postgres_port}/{self._settings.postgres_db} (intento {attempt}/{max_retries})"
                 )
                 return self._pool
             except Exception as e:
                 if attempt < max_retries:
                     logger.debug(
-                        "Intento %d/%d de conexion a PostgreSQL fallo (%s). Reintentando en %.1fs...",
-                        attempt,
-                        max_retries,
-                        e,
-                        retry_delay,
+                        f"Intento {attempt}/{max_retries} de conexion a PostgreSQL fallo ({e}). Reintentando en {retry_delay:.1f}s..."
                     )
                     await asyncio.sleep(retry_delay)
                 else:
                     logger.warning(
-                        "No se pudo conectar a PostgreSQL tras %d intentos (%s). Se operara con respaldo en memoria/semilla.",
-                        max_retries,
-                        e,
+                        f"No se pudo conectar a PostgreSQL tras {max_retries} intentos ({e}). Se operara con respaldo en memoria/semilla."
                     )
 
         self._pool = None

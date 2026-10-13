@@ -77,8 +77,7 @@ class PostgresDomainPolicyRepository(DomainPolicyRepositoryInterface):
                     )
                 return policies
         except Exception as e:
-            logger.error(
-                "Error al listar politicas de dominio desde PostgreSQL: %s", e)
+            logger.error(f"Error al listar politicas de dominio desde PostgreSQL: {e}")
             return []
 
     async def get_by_domain(self, domain: str) -> Optional[DomainPolicy]:
@@ -111,7 +110,7 @@ class PostgresDomainPolicyRepository(DomainPolicyRepositoryInterface):
                 )
         except Exception as e:
             logger.error(
-                "Error al obtener politica de dominio '%s' desde PostgreSQL: %s", domain, e)
+                f"Error al obtener politica de dominio '{domain}' desde PostgreSQL: {e}")
             return None
 
     async def upsert(self, policy: DomainPolicy) -> DomainPolicy:
@@ -165,7 +164,7 @@ class PostgresDomainPolicyRepository(DomainPolicyRepositoryInterface):
                 )
         except Exception as e:
             logger.error(
-                "Error al persistir politica de dominio '%s' en PostgreSQL: %s", policy.domain, e)
+                f"Error al persistir politica de dominio '{policy.domain}' en PostgreSQL: {e}")
             return policy
 
     async def delete(self, domain: str) -> bool:
@@ -180,5 +179,5 @@ class PostgresDomainPolicyRepository(DomainPolicyRepositoryInterface):
                 return "DELETE 1" in result
         except Exception as e:
             logger.error(
-                "Error al eliminar politica de dominio '%s' de PostgreSQL: %s", domain, e)
+                f"Error al eliminar politica de dominio '{domain}' de PostgreSQL: {e}")
             return False
