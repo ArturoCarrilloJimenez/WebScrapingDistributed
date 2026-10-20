@@ -22,39 +22,18 @@ class Settings(BaseSettings):
     sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue" # URL de la cola SQS local
     sqs_region: str = default_region_aws
 
-    # Landing Zone (MinIO Local / S3 Crudo)
-    raw_s3_endpoint_url: str | None = None
-    raw_s3_bucket_name: str | None = None
-    raw_s3_region: str | None = None
-    raw_s3_access_key_id: str | None = None
-    raw_s3_secret_access_key: str | None = None
-
     # Fallback legacy / genérico
     s3_endpoint_url: str = "http://localhost:9000"
     s3_bucket_name: str = "scraping-data-lake"
     s3_prefix_raw_data: str = "raw-data"
     s3_region: str = default_region_aws
 
-    @property
-    def effective_raw_endpoint_url(self) -> str:
-        return self.raw_s3_endpoint_url or self.s3_endpoint_url
-
-    @property
-    def effective_raw_bucket_name(self) -> str:
-        return self.raw_s3_bucket_name or self.s3_bucket_name
-
-    @property
-    def effective_raw_region(self) -> str:
-        return self.raw_s3_region or self.s3_region
-
-    @property
-    def effective_raw_access_key(self) -> str:
-        return self.raw_s3_access_key_id or self.aws_access_key_id
-
-    @property
-    def effective_raw_secret_key(self) -> str:
-        return self.raw_s3_secret_access_key or self.aws_secret_access_key
-
+    # Landing Zone (MinIO Local / S3 Crudo)
+    raw_s3_endpoint_url: str | None = s3_endpoint_url
+    raw_s3_bucket_name: str | None = s3_bucket_name
+    raw_s3_region: str | None = s3_region
+    raw_s3_access_key_id: str | None = aws_access_key_id
+    raw_s3_secret_access_key: str | None = aws_secret_access_key
 
     # Proxy y cliente de red
     proxy_enabled: bool = False  # Controla si se usan proxies o no

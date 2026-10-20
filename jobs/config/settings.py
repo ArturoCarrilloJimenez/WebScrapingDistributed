@@ -16,62 +16,22 @@ class Settings(BaseSettings):
     raw_data_retention_days: int = 7
 
     # Origen Crudo (Landing Zone - MinIO Local en VPS / Clúster)
-    raw_s3_endpoint_url: str | None = None
-    raw_s3_bucket_name: str | None = None
-    raw_s3_region: str | None = None
-    raw_s3_access_key_id: str | None = None
-    raw_s3_secret_access_key: str | None = None
+    raw_s3_endpoint_url: str | None = s3_endpoint_url
+    raw_s3_bucket_name: str | None = s3_bucket_name
+    raw_s3_region: str | None = s3_region
+    raw_s3_access_key_id: str | None = aws_access_key_id
+    raw_s3_secret_access_key: str | None = aws_secret_access_key
 
     # Destino Consolidado (Analytical Lake - AWS S3 Cloud o Cloudflare R2)
-    target_s3_endpoint_url: str | None = None
-    target_s3_bucket_name: str | None = None
-    target_s3_region: str | None = None
-    target_s3_access_key_id: str | None = None
-    target_s3_secret_access_key: str | None = None
+    target_s3_endpoint_url: str | None = s3_endpoint_url
+    target_s3_bucket_name: str | None = s3_bucket_name
+    target_s3_region: str | None = s3_region
+    target_s3_access_key_id: str | None = aws_access_key_id
+    target_s3_secret_access_key: str | None = aws_secret_access_key
 
     # Estrategia de optimización de disco en VPS
     # Si True: Borra los JSONL de MinIO inmediatamente tras confirmar la subida del Parquet a S3
     delete_raw_after_compaction: bool = True
-
-    @property
-    def effective_raw_endpoint_url(self) -> str:
-        return self.raw_s3_endpoint_url or self.s3_endpoint_url
-
-    @property
-    def effective_raw_bucket_name(self) -> str:
-        return self.raw_s3_bucket_name or self.s3_bucket_name
-
-    @property
-    def effective_raw_region(self) -> str:
-        return self.raw_s3_region or self.s3_region
-
-    @property
-    def effective_raw_access_key(self) -> str:
-        return self.raw_s3_access_key_id or self.aws_access_key_id
-
-    @property
-    def effective_raw_secret_key(self) -> str:
-        return self.raw_s3_secret_access_key or self.aws_secret_access_key
-
-    @property
-    def effective_target_endpoint_url(self) -> str:
-        return self.target_s3_endpoint_url or self.s3_endpoint_url
-
-    @property
-    def effective_target_bucket_name(self) -> str:
-        return self.target_s3_bucket_name or self.s3_bucket_name
-
-    @property
-    def effective_target_region(self) -> str:
-        return self.target_s3_region or self.s3_region
-
-    @property
-    def effective_target_access_key(self) -> str:
-        return self.target_s3_access_key_id or self.aws_access_key_id
-
-    @property
-    def effective_target_secret_key(self) -> str:
-        return self.target_s3_secret_access_key or self.aws_secret_access_key
 
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(
