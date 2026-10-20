@@ -19,15 +19,15 @@ class Settings(BaseSettings):
     raw_s3_endpoint_url: str | None = None
     raw_s3_bucket_name: str | None = None
     raw_s3_region: str | None = None
-    raw_aws_access_key_id: str | None = None
-    raw_aws_secret_access_key: str | None = None
+    raw_s3_access_key_id: str | None = None
+    raw_s3_secret_access_key: str | None = None
 
-    # Destino Consolidado (Analytical Lake - AWS S3 Cloud o MinIO)
+    # Destino Consolidado (Analytical Lake - AWS S3 Cloud o Cloudflare R2)
     target_s3_endpoint_url: str | None = None
     target_s3_bucket_name: str | None = None
     target_s3_region: str | None = None
-    target_aws_access_key_id: str | None = None
-    target_aws_secret_access_key: str | None = None
+    target_s3_access_key_id: str | None = None
+    target_s3_secret_access_key: str | None = None
 
     # Estrategia de optimización de disco en VPS
     # Si True: Borra los JSONL de MinIO inmediatamente tras confirmar la subida del Parquet a S3
@@ -47,11 +47,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_raw_access_key(self) -> str:
-        return self.raw_aws_access_key_id or self.aws_access_key_id
+        return self.raw_s3_access_key_id or self.aws_access_key_id
 
     @property
     def effective_raw_secret_key(self) -> str:
-        return self.raw_aws_secret_access_key or self.aws_secret_access_key
+        return self.raw_s3_secret_access_key or self.aws_secret_access_key
 
     @property
     def effective_target_endpoint_url(self) -> str:
@@ -67,11 +67,11 @@ class Settings(BaseSettings):
 
     @property
     def effective_target_access_key(self) -> str:
-        return self.target_aws_access_key_id or self.aws_access_key_id
+        return self.target_s3_access_key_id or self.aws_access_key_id
 
     @property
     def effective_target_secret_key(self) -> str:
-        return self.target_aws_secret_access_key or self.aws_secret_access_key
+        return self.target_s3_secret_access_key or self.aws_secret_access_key
 
     # Se usa model_config con SettingsConfigDict
     model_config = SettingsConfigDict(

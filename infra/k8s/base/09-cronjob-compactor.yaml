@@ -52,6 +52,16 @@ spec:
                     secretKeyRef:
                       name: scraping-secrets
                       key: RAW_S3_SECRET_ACCESS_KEY
+                - name: RAW_AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_ACCESS_KEY_ID
+                - name: RAW_AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: scraping-secrets
+                      key: RAW_S3_SECRET_ACCESS_KEY
                 - name: RAW_S3_ENDPOINT_URL
                   valueFrom:
                     secretKeyRef:
@@ -92,16 +102,6 @@ spec:
                     secretKeyRef:
                       name: scraping-secrets
                       key: AWS_SECRET_ACCESS_KEY
-                - name: S3_ENDPOINT_URL
-                  valueFrom:
-                    secretKeyRef:
-                      name: scraping-secrets
-                      key: S3_ENDPOINT_URL
-                - name: S3_BUCKET_NAME
-                  valueFrom:
-                    secretKeyRef:
-                      name: scraping-secrets
-                      key: S3_BUCKET_NAME
                 - name: DEFAULT_REGION_AWS
                   valueFrom:
                     secretKeyRef:

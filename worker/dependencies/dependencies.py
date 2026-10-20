@@ -23,10 +23,10 @@ _adapter_sqs_instance = SQSAioBotoAdapter(
 )
 
 _adapter_s3_instance = S3StorageRepository(
-    endpoint_url=settings.s3_endpoint_url,
-    bucket_name=settings.s3_bucket_name,
+    endpoint_url=settings.effective_raw_endpoint_url,
+    bucket_name=settings.effective_raw_bucket_name,
     prefix_raw_data=settings.s3_prefix_raw_data,
-    region=settings.s3_region
+    region=settings.effective_raw_region
 )
 
 _cache_adapter_instance = RedisCacheAdapter(

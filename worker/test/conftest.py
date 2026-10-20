@@ -66,6 +66,9 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     original_s3_endpoint = settings.s3_endpoint_url
     original_s3_bucket = settings.s3_bucket_name
     original_s3_region = settings.s3_region
+    original_raw_endpoint = settings.raw_s3_endpoint_url
+    original_raw_bucket = settings.raw_s3_bucket_name
+    original_raw_region = settings.raw_s3_region
     original_s3_adapter_instance = worker_deps._adapter_s3_instance
 
     # Forzamos la configuración del test hacia la cola dinámica de Moto y sus credenciales
@@ -76,6 +79,9 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     settings.s3_endpoint_url = endpoint_url
     settings.s3_bucket_name = "test-bucket"
     settings.s3_region = "us-east-1"
+    settings.raw_s3_endpoint_url = endpoint_url
+    settings.raw_s3_bucket_name = "test-bucket"
+    settings.raw_s3_region = "us-east-1"
 
     # Instanciamos el adaptador asíncrono apuntando directamente al endpoint HTTP de Moto
     mocked_adapter = SQSAioBotoAdapter(
@@ -122,6 +128,9 @@ def sqs_mock(moto_sqs_server, moto_sqs_port):
     settings.s3_endpoint_url = original_s3_endpoint
     settings.s3_bucket_name = original_s3_bucket
     settings.s3_region = original_s3_region
+    settings.raw_s3_endpoint_url = original_raw_endpoint
+    settings.raw_s3_bucket_name = original_raw_bucket
+    settings.raw_s3_region = original_raw_region
     worker_deps._adapter_s3_instance = original_s3_adapter_instance
 
 

@@ -66,8 +66,8 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
 
     # Comprobamos que el archivo se persistió correctamente en S3
     import boto3
-    s3_client = boto3.client("s3", region_name="us-east-1", endpoint_url=settings.s3_endpoint_url)
-    s3_objects = s3_client.list_objects_v2(Bucket=settings.s3_bucket_name)
+    s3_client = boto3.client("s3", region_name="us-east-1", endpoint_url=settings.effective_raw_endpoint_url)
+    s3_objects = s3_client.list_objects_v2(Bucket=settings.effective_raw_bucket_name)
     assert "Contents" in s3_objects, "No se guardó el resultado del raspado en S3"
     assert len(s3_objects["Contents"]) == 1, "Debería haber exactamente un objeto en S3"
     
@@ -75,7 +75,7 @@ async def test_worker_lifecycle_and_scraping_flow(sqs_mock, worker_controller):
     assert s3_key.startswith("raw-data/job_id=job_worker_test_001/"), f"Estructura Hive S3 incorrecta: {s3_key}"
 
     # Leemos el objeto de S3 y verificamos su contenido JSON Lines
-    obj_data = s3_client.get_object(Bucket=settings.s3_bucket_name, Key=s3_key)
+    obj_data = s3_client.get_object(Bucket=settings.effective_raw_bucket_name, Key=s3_key)
     body_content = obj_data["Body"].read().decode("utf-8")
     lines = [json.loads(line) for line in body_content.strip().split("\n") if line]
     assert len(lines) == 1

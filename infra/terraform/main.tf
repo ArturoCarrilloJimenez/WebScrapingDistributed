@@ -1,235 +1,55 @@
-# --- Provider parametrizable (Local vs AWS) ---
-variable "is_local" {
-  type        = bool
-  default     = true
-  description = "Define si el despliegue es contra Floci/LocalStack o AWS real"
+# ==============================================================================
+# WebScrapingDistributed — Terraform Infrastructure as Code (AWS SQS & IAM)
+# ==============================================================================
+
+variable "aws_region" {
+  type        = string
+  default     = "eu-central-1"
+  description = "Región de AWS para las colas SQS e IAM (eu-central-1 Fráncfort recomendada)"
 }
 
+variable "is_local" {
+  type        = bool
+  default     = false
+  description = "Define si el despliegue es contra Floci/LocalStack (true) o AWS real (false)"
+}
+
+# --- AWS Provider ---
 provider "aws" {
-  region                      = "us-east-1"
+  region                      = var.aws_region
   access_key                  = var.is_local ? "test" : null
   secret_key                  = var.is_local ? "test" : null
   skip_credentials_validation = var.is_local
   skip_metadata_api_check     = var.is_local
   skip_requesting_account_id  = var.is_local
-  s3_use_path_style           = var.is_local
 
   dynamic "endpoints" {
     for_each = var.is_local ? [1] : []
     content {
       sqs = "http://localhost:31000"
-      s3  = "http://localhost:31000"
     }
   }
 }
 
-# --- Migración de estado sin destrucción ---
-moved {
-  from = aws_s3_bucket.scraping-data-lake
-  to   = aws_s3_bucket.scraping_data_lake
-}
+# ==============================================================================
+# 1. Colas Amazon SQS & Dead Letter Queues (DLQ)
+# ==============================================================================
 
-moved {
-  from = aws_sqs_queue.scraping-tasks-dlq-static
-  to   = aws_sqs_queue.scraping_tasks_dlq_static
-}
-
-moved {
-  from = aws_sqs_queue.scraping-tasks-static
-  to   = aws_sqs_queue.scraping_tasks_static
-}
-
-moved {
-  from = aws_sqs_queue.scraping-tasks-dlq-dynamic
-  to   = aws_sqs_queue.scraping_tasks_dlq_dynamic
-}
-
-moved {
-  from = aws_sqs_queue.scraping-tasks-dynamic
-  to   = aws_sqs_queue.scraping_tasks_dynamic
-}
-
-# --- Data Lake Principal ---
-resource "aws_s3_bucket" "scraping_data_lake" {
-  bucket = "scraping-data-lake"
-
-  tags = {
-    Name        = "scraping-data-lake"
-    Environment = var.is_local ? "local" : "production"
-  }
-}
-
-# Bloqueo estricto de acceso público para Data Lake Principal
-resource "aws_s3_bucket_public_access_block" "scraping_data_lake" {
-  bucket                  = aws_s3_bucket.scraping_data_lake.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# Cifrado en reposo predeterminado AES256
-resource "aws_s3_bucket_server_side_encryption_configuration" "scraping_data_lake" {
-  bucket = aws_s3_bucket.scraping_data_lake.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# Control de versiones para evitar borrado accidental
-resource "aws_s3_bucket_versioning" "scraping_data_lake" {
-  bucket = aws_s3_bucket.scraping_data_lake.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# Política de obligatoriedad de acceso por HTTPS (Cifrado en Tránsito)
-resource "aws_s3_bucket_policy" "scraping_data_lake" {
-  count  = var.is_local ? 0 : 1
-  bucket = aws_s3_bucket.scraping_data_lake.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "EnforceHTTPSOnly"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.scraping_data_lake.arn,
-          "${aws_s3_bucket.scraping_data_lake.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# --- Infraestructura de Logging ---
-resource "aws_s3_bucket" "scraping_data_lake_logs" {
-  bucket = "scraping-data-lake-logs"
-
-  tags = {
-    Name        = "scraping-data-lake-logs"
-    Environment = var.is_local ? "local" : "production"
-  }
-}
-
-# Bloqueo estricto de acceso público para Bucket de Logs
-resource "aws_s3_bucket_public_access_block" "scraping_data_lake_logs" {
-  bucket                  = aws_s3_bucket.scraping_data_lake_logs.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# Cifrado en reposo para Bucket de Logs
-resource "aws_s3_bucket_server_side_encryption_configuration" "scraping_data_lake_logs" {
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# Control de versiones para Bucket de Logs
-resource "aws_s3_bucket_versioning" "scraping_data_lake_logs" {
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# Permisos de entrega de logs para el bucket receptor (AWS log-delivery-write)
-resource "aws_s3_bucket_ownership_controls" "scraping_data_lake_logs" {
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-
-  rule {
-    object_ownership = "BucketOwnerPreferred"
-  }
-}
-
-resource "aws_s3_bucket_acl" "scraping_data_lake_logs" {
-  depends_on = [aws_s3_bucket_ownership_controls.scraping_data_lake_logs]
-
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-  acl    = "log-delivery-write"
-}
-
-# Política de obligatoriedad de acceso por HTTPS para Bucket de Logs
-resource "aws_s3_bucket_policy" "scraping_data_lake_logs" {
-  count  = var.is_local ? 0 : 1
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "EnforceHTTPSOnly"
-        Effect    = "Deny"
-        Principal = "*"
-        Action    = "s3:*"
-        Resource = [
-          aws_s3_bucket.scraping_data_lake_logs.arn,
-          "${aws_s3_bucket.scraping_data_lake_logs.arn}/*"
-        ]
-        Condition = {
-          Bool = {
-            "aws:SecureTransport" = "false"
-          }
-        }
-      }
-    ]
-  })
-}
-
-# Registro de accesos del Data Lake hacia el Bucket de Logs (Solo en Producción AWS)
-resource "aws_s3_bucket_logging" "scraping_data_lake" {
-  count         = var.is_local ? 0 : 1
-  bucket        = aws_s3_bucket.scraping_data_lake.id
-  target_bucket = aws_s3_bucket.scraping_data_lake_logs.id
-  target_prefix = "access-logs/"
-}
-
-# Purga automática de logs a los 90 días para optimizar costes (Solo en Producción AWS)
-resource "aws_s3_bucket_lifecycle_configuration" "scraping_data_lake_logs" {
-  count  = var.is_local ? 0 : 1
-  bucket = aws_s3_bucket.scraping_data_lake_logs.id
-
-  rule {
-    id     = "auto-delete-old-logs"
-    status = "Enabled"
-
-    filter {
-      prefix = "access-logs/"
-    }
-
-    expiration {
-      days = 90
-    }
-  }
-}
-
-# --- Colas SQS Estáticas & DLQ ---
+# DLQ para tareas estáticas (14 días de retención)
 resource "aws_sqs_queue" "scraping_tasks_dlq_static" {
   name                      = "scraping-tasks-dlq-static"
   receive_wait_time_seconds = 20
-  message_retention_seconds = 1209600 # 14 días
+  message_retention_seconds = 1209600
   sqs_managed_sse_enabled   = true
+
+  tags = {
+    Project     = "WebScrapingDistributed"
+    Environment = var.is_local ? "local" : "production"
+    Type        = "DLQ-Static"
+  }
 }
 
+# Cola principal para tareas estáticas (Fast HTML / httpx / curl_cffi)
 resource "aws_sqs_queue" "scraping_tasks_static" {
   name                       = "scraping-tasks-static"
   visibility_timeout_seconds = 300
@@ -240,16 +60,29 @@ resource "aws_sqs_queue" "scraping_tasks_static" {
     deadLetterTargetArn = aws_sqs_queue.scraping_tasks_dlq_static.arn
     maxReceiveCount     = 10
   })
+
+  tags = {
+    Project     = "WebScrapingDistributed"
+    Environment = var.is_local ? "local" : "production"
+    Type        = "Worker-Static"
+  }
 }
 
-# --- Colas SQS Dinámicas (Playwright) & DLQ ---
+# DLQ para tareas dinámicas (14 días de retención)
 resource "aws_sqs_queue" "scraping_tasks_dlq_dynamic" {
   name                      = "scraping-tasks-dlq-dynamic"
   receive_wait_time_seconds = 20
-  message_retention_seconds = 1209600 # 14 días
+  message_retention_seconds = 1209600
   sqs_managed_sse_enabled   = true
+
+  tags = {
+    Project     = "WebScrapingDistributed"
+    Environment = var.is_local ? "local" : "production"
+    Type        = "DLQ-Dynamic"
+  }
 }
 
+# Cola principal para tareas dinámicas (Playwright Headless Chromium)
 resource "aws_sqs_queue" "scraping_tasks_dynamic" {
   name                       = "scraping-tasks-dynamic"
   visibility_timeout_seconds = 900
@@ -260,4 +93,99 @@ resource "aws_sqs_queue" "scraping_tasks_dynamic" {
     deadLetterTargetArn = aws_sqs_queue.scraping_tasks_dlq_dynamic.arn
     maxReceiveCount     = 10
   })
+
+  tags = {
+    Project     = "WebScrapingDistributed"
+    Environment = var.is_local ? "local" : "production"
+    Type        = "Worker-Dynamic"
+  }
+}
+
+# ==============================================================================
+# 2. Seguridad & IAM: Usuario con Menor Privilegio para la VPS Hetzner
+# ==============================================================================
+
+resource "aws_iam_user" "scraper_bot" {
+  name = "scraper_vps_bot"
+
+  tags = {
+    Project     = "WebScrapingDistributed"
+    Role        = "Worker and Producer SQS Broker Client"
+    Environment = var.is_local ? "local" : "production"
+  }
+}
+
+resource "aws_iam_access_key" "scraper_bot_key" {
+  user = aws_iam_user.scraper_bot.name
+}
+
+# Política restrictiva: solo permite operar sobre las colas del proyecto
+resource "aws_iam_user_policy" "scraper_bot_sqs_policy" {
+  name = "ScraperSQSLeastPrivilegePolicy"
+  user = aws_iam_user.scraper_bot.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowSQSOperationsOnScrapingQueues"
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ChangeMessageVisibility"
+        ]
+        Resource = [
+          aws_sqs_queue.scraping_tasks_static.arn,
+          aws_sqs_queue.scraping_tasks_dlq_static.arn,
+          aws_sqs_queue.scraping_tasks_dynamic.arn,
+          aws_sqs_queue.scraping_tasks_dlq_dynamic.arn
+        ]
+      },
+      {
+        Sid      = "AllowListQueues"
+        Effect   = "Allow"
+        Action   = ["sqs:ListQueues"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ==============================================================================
+# 3. Outputs (Valores listos para inyectar en 02-secret.yaml de Kubernetes)
+# ==============================================================================
+
+output "aws_region" {
+  description = "Región de AWS configurada"
+  value       = var.aws_region
+}
+
+output "sqs_endpoint_url" {
+  description = "Endpoint oficial de SQS en la región seleccionada"
+  value       = "https://sqs.${var.aws_region}.amazonaws.com"
+}
+
+output "sqs_queue_url_static" {
+  description = "URL de la cola SQS estática para 02-secret.yaml"
+  value       = aws_sqs_queue.scraping_tasks_static.url
+}
+
+output "sqs_queue_url_dynamic" {
+  description = "URL de la cola SQS dinámica para 02-secret.yaml"
+  value       = aws_sqs_queue.scraping_tasks_dynamic.url
+}
+
+output "scraper_access_key_id" {
+  description = "Access Key ID del usuario IAM scraper-vps-bot para 02-secret.yaml"
+  value       = aws_iam_access_key.scraper_bot_key.id
+}
+
+output "scraper_secret_access_key" {
+  description = "Secret Access Key del usuario IAM scraper-vps-bot para 02-secret.yaml"
+  value       = aws_iam_access_key.scraper_bot_key.secret
+  sensitive   = true
 }
