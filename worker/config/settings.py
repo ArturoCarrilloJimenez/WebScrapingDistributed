@@ -22,12 +22,18 @@ class Settings(BaseSettings):
     sqs_queue_url: str = "http://localhost:9324/000000000000/my-queue" # URL de la cola SQS local
     sqs_region: str = default_region_aws
 
-    # s3
-    s3_endpoint_url: str = "http://localhost:9000"  # URL del endpoint de S3 local
-    s3_bucket_name: str = "scraping-data-lake"  # Nombre del bucket S3 por defecto
-    s3_prefix_raw_data: str = "raw-data"  # Prefijo de las claves de S3 para los datos crudos
+    # Fallback legacy / genérico
+    s3_endpoint_url: str = "http://localhost:9000"
+    s3_bucket_name: str = "scraping-data-lake"
+    s3_prefix_raw_data: str = "raw-data"
     s3_region: str = default_region_aws
 
+    # Landing Zone (MinIO Local / S3 Crudo)
+    raw_s3_endpoint_url: str | None = s3_endpoint_url
+    raw_s3_bucket_name: str | None = s3_bucket_name
+    raw_s3_region: str | None = s3_region
+    raw_s3_access_key_id: str | None = aws_access_key_id
+    raw_s3_secret_access_key: str | None = aws_secret_access_key
 
     # Proxy y cliente de red
     proxy_enabled: bool = False  # Controla si se usan proxies o no

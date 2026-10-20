@@ -62,6 +62,10 @@ spec:
           volumeMounts:
             - name: minio-storage
               mountPath: /data
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "mkdir -p /data/scraping-data-lake"]
           livenessProbe:
             httpGet:
               path: /minio/health/live

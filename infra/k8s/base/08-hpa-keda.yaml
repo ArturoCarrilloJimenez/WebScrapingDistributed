@@ -35,10 +35,9 @@ spec:
       authenticationRef:
         name: keda-aws-credentials
       metadata:
-        awsEndpoint: "http://emulator-aws.web-scraping-distributed.svc.cluster.local:4566"
         queueURLFromEnv: SQS_QUEUE_URL
         queueLength: "45"
-        awsRegion: "us-east-1"
+        awsRegion: "eu-central-1"
 
 ---
 
@@ -62,7 +61,6 @@ spec:
       authenticationRef:
         name: keda-aws-credentials
       metadata:
-        awsEndpoint: "http://emulator-aws.web-scraping-distributed.svc.cluster.local:4566"
         queueURLFromEnv: SQS_QUEUE_URL
         queueLength: "5"
-        awsRegion: "us-east-1"
+        awsRegion: "eu-central-1"

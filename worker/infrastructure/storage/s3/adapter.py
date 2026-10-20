@@ -34,8 +34,8 @@ class S3StorageRepository(BaseStorageRepository):
                 "s3",
                 region_name=self.region,
                 endpoint_url=self.endpoint_url,
-                aws_access_key_id=settings.aws_access_key_id,
-                aws_secret_access_key=settings.aws_secret_access_key,
+                aws_access_key_id=settings.raw_s3_access_key_id,
+                aws_secret_access_key=settings.raw_s3_secret_access_key,
                 config=config
             )
             # Poblamos la referencia entrando explícitamente en el gestor de contexto asíncrono

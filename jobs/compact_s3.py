@@ -45,10 +45,10 @@ def _get_client(
     try:
         return session.client(
             "s3",
-            region_name=region or settings.effective_raw_region,
-            endpoint_url=endpoint_url or settings.effective_raw_endpoint_url,
-            aws_access_key_id=access_key or settings.effective_raw_access_key,
-            aws_secret_access_key=secret_key or settings.effective_raw_secret_key,
+            region_name=region or settings.raw_s3_region,
+            endpoint_url=endpoint_url or settings.raw_s3_endpoint_url,
+            aws_access_key_id=access_key or settings.raw_s3_access_key_id,
+            aws_secret_access_key=secret_key or settings.raw_s3_secret_access_key,
             config=config
         )
     except Exception as e:
@@ -68,7 +68,7 @@ async def _is_batch_compacted(client, key: str, bucket_name: str | None = None) 
     """
     Consulta si el objeto S3 crudo ya tiene la etiqueta compacted=true.
     """
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
     try:
         tagging = await client.get_object_tagging(
             Bucket=bucket,
@@ -84,7 +84,7 @@ async def tag_batches_as_compacted(client, batches: list[S3BatchFile], bucket_na
     """
     Aplica la etiqueta compacted=true en S3 a los lotes crudos procesados.
     """
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
     for batch in batches:
         try:
             await client.put_object_tagging(
@@ -97,7 +97,7 @@ async def tag_batches_as_compacted(client, batches: list[S3BatchFile], bucket_na
 
 
 async def get_list_of_jobs(client, bucket_name: str | None = None) -> list[str]:
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
     try:
         paginator = client.get_paginator('list_objects_v2')
         log.info(
@@ -125,7 +125,7 @@ async def get_list_of_batches(
     semaphore: asyncio.Semaphore,
     bucket_name: str | None = None
 ) -> ListOfJobs:
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
 
     async with semaphore:
         try:
@@ -189,7 +189,7 @@ async def _upload_compacted_file(
     """
     Sube el archivo Parquet local al almacenamiento analítico de forma asíncrona.
     """
-    bucket = bucket_name or settings.effective_target_bucket_name
+    bucket = bucket_name or settings.target_s3_bucket_name
     s3_key = (
         f"{settings.s3_prefix_compacted_data}/"
         f"job_id={job_id}/year={first_date.year}/month={first_date.month}/"
@@ -210,7 +210,7 @@ async def clear_job(client, job: ListOfJobs, bucket_name: str | None = None) -> 
     """
     if not job or not job.batches:
         return
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
     try:
         log.info(
             f"Iniciando purga de la Landing Zone para el Job: {job.prefix} en bucket [{bucket}]")
@@ -234,7 +234,7 @@ async def purge_expired_raw_data(client, bucket_name: str | None = None) -> int:
     Examina la Landing Zone y elimina objetos crudos cuya fecha de modificación
     supere los días de retención configurados (raw_data_retention_days).
     """
-    bucket = bucket_name or settings.effective_raw_bucket_name
+    bucket = bucket_name or settings.raw_s3_bucket_name
     try:
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         retention_threshold = now_utc - datetime.timedelta(
@@ -327,7 +327,7 @@ class JobCompactor:
         self.job = job
         self.schema = schema
         self.job_id = job_id
-        self.target_bucket = target_bucket or settings.effective_target_bucket_name
+        self.target_bucket = target_bucket or settings.target_s3_bucket_name
         
         self.part_counter = 0
         self.rows_in_current_file = 0
@@ -413,8 +413,8 @@ async def process_job(
     raw_bucket: str | None = None,
     target_bucket: str | None = None
 ) -> ListOfJobs | None:
-    source_b = raw_bucket or settings.effective_raw_bucket_name
-    target_b = target_bucket or settings.effective_target_bucket_name
+    source_b = raw_bucket or settings.raw_s3_bucket_name
+    target_b = target_bucket or settings.target_s3_bucket_name
 
     async with compaction_semaphore:
         if not _is_job_eligible(job):
@@ -482,27 +482,27 @@ async def process_job(
 async def main():
     log.info("Iniciando micro-orquestador de compactación S3 Multinivel...")
     raw_ctx = _get_client(
-        endpoint_url=settings.effective_raw_endpoint_url,
-        region=settings.effective_raw_region,
-        access_key=settings.effective_raw_access_key,
-        secret_key=settings.effective_raw_secret_key
+        endpoint_url=settings.raw_s3_endpoint_url,
+        region=settings.raw_s3_region,
+        access_key=settings.raw_s3_access_key_id,
+        secret_key=settings.raw_s3_secret_access_key
     )
     target_ctx = _get_client(
-        endpoint_url=settings.effective_target_endpoint_url,
-        region=settings.effective_target_region,
-        access_key=settings.effective_target_access_key,
-        secret_key=settings.effective_target_secret_key
+        endpoint_url=settings.target_s3_endpoint_url,
+        region=settings.target_s3_region,
+        access_key=settings.target_s3_access_key_id,
+        secret_key=settings.target_s3_secret_access_key
     )
 
     async with raw_ctx as raw_client, target_ctx as target_client:
         try:
             # Fase 1: Descubrimiento de Carpetas Virtuales en Landing Zone
-            job_prefixes = await get_list_of_jobs(raw_client, bucket_name=settings.effective_raw_bucket_name)
+            job_prefixes = await get_list_of_jobs(raw_client, bucket_name=settings.raw_s3_bucket_name)
             if job_prefixes:
                 # Fase 2: Análisis Concurrente de Metadatos (I/O Bound)
                 metadata_semaphore = asyncio.Semaphore(20)
                 metadata_tasks = [
-                    get_list_of_batches(raw_client, prefix, metadata_semaphore, bucket_name=settings.effective_raw_bucket_name)
+                    get_list_of_batches(raw_client, prefix, metadata_semaphore, bucket_name=settings.raw_s3_bucket_name)
                     for prefix in job_prefixes
                 ]
 
@@ -518,8 +518,8 @@ async def main():
                         target_client,
                         job,
                         compaction_semaphore,
-                        raw_bucket=settings.effective_raw_bucket_name,
-                        target_bucket=settings.effective_target_bucket_name
+                        raw_bucket=settings.raw_s3_bucket_name,
+                        target_bucket=settings.target_s3_bucket_name
                     )
                     for job in analyzed_jobs
                 ]
@@ -535,7 +535,7 @@ async def main():
 
             # Fase 4: Purga de Retención TTL en Landing Zone
             log.info("Iniciando fase de gestión de retención y expiración TTL...")
-            await purge_expired_raw_data(raw_client, bucket_name=settings.effective_raw_bucket_name)
+            await purge_expired_raw_data(raw_client, bucket_name=settings.raw_s3_bucket_name)
             log.info("Proceso global de compactación y retención finalizado con éxito.")
 
         except Exception as e:
