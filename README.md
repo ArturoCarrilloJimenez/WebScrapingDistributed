@@ -27,7 +27,7 @@ El cliente envía una carga masiva de trabajo y recibe una respuesta instantáne
 | **Capa Activa Anti-Bot (`HoneypotGuard`)** | Filtrado activo de trampas Honeypot en HTML estático (bs4) e inspección batch en JavaScript (~15 ms) en Chromium (Playwright). |
 | **Gestión Eficiente de Recursos V8** | Límite estricto de RAM por pestaña (512MB), recolección de basura `gc.collect()` y reciclaje automático de Chromium cada 25 tareas. |
 | **Resiliencia & Backoff Dinámico** | Clasificación de excepciones con recálculo dinámico de Visibility Timeout en SQS (exponencial con jitter para bloqueos 403/429, lineal para timeouts/5xx). |
-| **Orquestación Cloud-Native & K8s** | Despliegue automatizado con Kustomize, KEDA autoscaling (Scale-to-Zero), CronJob compactor y CI/CD en GitHub Actions con **117 tests (100% verdes)** y **98% cobertura** en Producer. |
+| **Orquestación Cloud-Native & K8s** | Despliegue automatizado con Kustomize, KEDA autoscaling (Scale-to-Zero), CronJob compactor y CI/CD en GitHub Actions con **119 tests (100% verdes)** y **98% cobertura** en Producer. |
 
 ---
 
@@ -90,6 +90,7 @@ graph TD
 
 El **Producer** es una API de alto rendimiento desarrollada con **FastAPI**:
 - **Respuesta Asíncrona (`202 Accepted`)**: Libera al cliente inmediatamente (patrón Fire and Forget).
+- **Contexto Jerárquico Resiliente**: Soporta metadatos de contexto a nivel de lote (`request.context`) e individuales por tarea (`task.context`), combinándolos con precedencia de tarea y persistencia hasta S3/Parquet.
 - **Gobernanza Centralizada (`/v1/domains`)**: Endpoints REST para crear, consultar, actualizar o eliminar políticas de dominio con resolución jerárquica (`data.sec.gov` ➔ `sec.gov` ➔ `default`).
 - **Resiliencia L1/L2**: Caché L1 en memoria (0.001 ms) para no sobrecargar la base de datos, respaldada por **PostgreSQL** L2 con bucle de auto-reconexión cada 30 segundos (`_background_db_health_and_sync`).
 - **Enrutamiento Dinámico**: Dirige las tareas a `scraping-tasks-static` o `scraping-tasks-dynamic` según el `parser_type`.
@@ -145,7 +146,7 @@ El **Worker** es el consumidor autónomo encargado de la gobernanza activa y la 
 | **ETL Compactor Job** | Compacción Dual-Target MinIO ➔ AWS S3 con Delete-on-Success | Python 3.13, PyArrow, Pandas | **Completado (10 Tests)** |
 | **Terraform (IaC)** | Declaración de infraestructura SQS, S3 y DLQ | Terraform 1.5+, HCL | **Completado** |
 | **Kubernetes (K8s)** | Despliegues, Kustomize, KEDA Scale-to-Zero, CronJob | K8s, KEDA, Kustomize, Docker | **Completado** |
-| **CI/CD Pipeline** | Validación Pytest, SonarCloud y auto-push Docker Hub | GitHub Actions | **Completado (117 Tests)** |
+| **CI/CD Pipeline** | Validación Pytest, SonarCloud y auto-push Docker Hub | GitHub Actions | **Completado (119 Tests)** |
 
 ---
 
@@ -165,7 +166,7 @@ WebScrapingDistributed/
 │   ├── dependencies/               # DI: SQS Client Singleton, Database Pool
 │   ├── infrastructure/             # Adaptador SQS Batch y Repositorio PostgreSQL
 │   ├── scraping/                   # Endpoints FastAPI (/tasks, /domains) y controladores
-│   ├── test/                       # 23 tests unitarios y de resiliencia (98% cobertura)
+│   ├── test/                       # 25 tests unitarios y de resiliencia (98% cobertura)
 │   ├── main.py                     # Entrypoint FastAPI con ciclo de vida lifespan
 │   └── Dockerfile
 │
@@ -333,5 +334,5 @@ uv run pytest
 - [x] **Kubernetes & KEDA**: Despliegues, KEDA Scale-to-Zero, MinIO, PostgreSQL y CronJob de compactación.
 - [x] **Suite de Tests Exhaustiva & Calidad SonarCloud**: 117 tests verdes (100% éxito) con **98% cobertura en Producer**.
 - [ ] **Validación Operativa End-to-End en Vivo**: Ingestión real masiva de SEC EDGAR con consolidación en Parquet sobre clúster.
-- [ ] **Despliegue en VPS Hetzner (K3s)**: Instalación ligera en servidor de producción.
+- [x] **Despliegue en VPS Hetzner (K3s)**: Instalación ligera en servidor de producción.
 - [ ] **Dashboard de Telemetría (Prometheus & Grafana)**: Métricas en tiempo real de latencia, backoff y tokens de dominio.
