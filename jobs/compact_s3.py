@@ -35,20 +35,32 @@ def _get_client(
     secret_key: str | None = None
 ):
     """
-    Fábrica asíncrona de clientes S3 desacoplada para admitir almacenamiento multinivel (MinIO vs AWS S3).
+    Fábrica asíncrona de clientes S3 desacoplada para admitir almacenamiento multinivel (MinIO vs AWS S3 / Cloudflare R2).
     """
+    # Si se invoca sin argumentos (fallback legacy/tests), usamos el origen crudo por defecto
+    if endpoint_url is None and access_key is None:
+        endpoint_url = settings.raw_s3_endpoint_url
+        region = region or settings.raw_s3_region
+        access_key = settings.raw_s3_access_key_id
+        secret_key = settings.raw_s3_secret_access_key
+
     config = Config(
         max_pool_connections=50,
-        retries={'max_attempts': 5, 'mode': 'standard'}
+        retries={'max_attempts': 5, 'mode': 'standard'},
+        s3={'addressing_style': 'path'}
     )
-    session = aioboto3.Session()
+    session = aioboto3.Session(
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name=region
+    )
     try:
         return session.client(
             "s3",
-            region_name=region or settings.raw_s3_region,
-            endpoint_url=endpoint_url or settings.raw_s3_endpoint_url,
-            aws_access_key_id=access_key or settings.raw_s3_access_key_id,
-            aws_secret_access_key=secret_key or settings.raw_s3_secret_access_key,
+            region_name=region,
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
             config=config
         )
     except Exception as e:
@@ -481,6 +493,16 @@ async def process_job(
 
 async def main():
     log.info("Iniciando micro-orquestador de compactación S3 Multinivel...")
+    raw_key_len = len(settings.raw_s3_access_key_id) if settings.raw_s3_access_key_id else 0
+    target_key_len = len(settings.target_s3_access_key_id) if settings.target_s3_access_key_id else 0
+    log.info(
+        f"Almacenamiento Landing (Raw): Endpoint={settings.raw_s3_endpoint_url} | "
+        f"Region={settings.raw_s3_region} | KeyLength={raw_key_len} | Bucket={settings.raw_s3_bucket_name}"
+    )
+    log.info(
+        f"Almacenamiento Analytical (Target): Endpoint={settings.target_s3_endpoint_url} | "
+        f"Region={settings.target_s3_region} | KeyLength={target_key_len} | Bucket={settings.target_s3_bucket_name}"
+    )
     raw_ctx = _get_client(
         endpoint_url=settings.raw_s3_endpoint_url,
         region=settings.raw_s3_region,

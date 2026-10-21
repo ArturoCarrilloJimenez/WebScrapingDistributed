@@ -27,7 +27,7 @@ spec:
           containers:
             - name: compactor
               image: arturocarrillojimenez/web-scraping-jobs:latest
-              imagePullPolicy: IfNotPresent
+              imagePullPolicy: Always
               command: ["/app/.venv/bin/python", "compact_s3.py"]
               resources:
                 requests:
@@ -92,16 +92,6 @@ spec:
                     secretKeyRef:
                       name: scraping-secrets
                       key: TARGET_S3_BUCKET_NAME
-                - name: AWS_ACCESS_KEY_ID
-                  valueFrom:
-                    secretKeyRef:
-                      name: scraping-secrets
-                      key: AWS_ACCESS_KEY_ID
-                - name: AWS_SECRET_ACCESS_KEY
-                  valueFrom:
-                    secretKeyRef:
-                      name: scraping-secrets
-                      key: AWS_SECRET_ACCESS_KEY
                 - name: DEFAULT_REGION_AWS
                   valueFrom:
                     secretKeyRef:

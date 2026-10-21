@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     # Destino Consolidado (Analytical Lake - AWS S3 Cloud o Cloudflare R2)
     target_s3_endpoint_url: str | None = s3_endpoint_url
     target_s3_bucket_name: str | None = s3_bucket_name
-    target_s3_region: str | None = s3_region
-    target_s3_access_key_id: str | None = aws_access_key_id
-    target_s3_secret_access_key: str | None = aws_secret_access_key
+    target_s3_region: str | None = "auto"
+    target_s3_access_key_id: str | None = None
+    target_s3_secret_access_key: str | None = None
 
     # Estrategia de optimización de disco en VPS
     # Si True: Borra los JSONL de MinIO inmediatamente tras confirmar la subida del Parquet a S3
