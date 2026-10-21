@@ -56,6 +56,9 @@ class ScrapingOrchestrator:
                 **(task.headers or {}),
             }
 
+        # Combinar contexto: valores globales como base, el contexto de la tarea tiene prioridad
+        context = {**(request.context or {}), **(task.context or {})}
+
         return ScrapingTask(
             job_id=request.job_id,
             batch_id=batch_id,
@@ -65,7 +68,7 @@ class ScrapingOrchestrator:
             priority=task.priority,
             max_depth=task.max_depth,
             max_retries=task.max_retries,
-            context=request.context,
+            context=context,
             headers=effective_headers,
             use_proxy=use_proxy,
             respect_robots_txt=respect_robots_txt,

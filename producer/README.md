@@ -90,38 +90,49 @@ El microservicio lee sus opciones desde el archivo `.env` en la raíz del proyec
 
 ### 1. Ingesta de Tareas: `POST /v1/scraping/tasks`
 
-Encola de forma asíncrona un lote de tareas de scraping con respuesta inmediata `202 Accepted`.
+Encola de forma asíncrona un lote de tareas de scraping con respuesta inmediata `202 Accepted`. Soporta metadatos de contexto jerárquicos (`context` a nivel de lote y específico por tarea) que se propagan hasta el almacenamiento analítico final en S3 / Parquet.
 
-#### Ejemplo de Cuerpo de Petición:
+#### Ejemplo de Cuerpo de Petición con Contexto Jerárquico:
 ```json
 {
-  "job_id": "catalogo-productos-2026",
+  "job_id": "sec-edgar-filings-2026",
+  "context": {
+    "source": "sec_edgar",
+    "dataset": "historical_8k",
+    "fiscal_year": 2024
+  },
   "tasks": [
     {
-      "url": "https://example.com/tienda/portatiles",
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000106/aapl-20241031.htm",
       "parser_type": "static_css",
       "parser_config": {
-        "container": "article.product-card",
         "selectors": {
-          "nombre": "h2.title",
-          "precio": "span.price",
-          "enlace_detalle": {
-            "selector": "a.product-link",
-            "attribute": "href"
-          }
+          "titulo": "title",
+          "contenido": "body"
         }
       },
+      "headers": {
+        "User-Agent": "InvestigacionAcademica contacto@miuniversidad.edu"
+      },
       "priority": 5,
-      "max_retries": 3
+      "max_retries": 3,
+      "context": {
+        "ticker": "AAPL",
+        "cik": "0000320193",
+        "accession_number": "0000320193-24-000106",
+        "fiscal_year": 2023
+      }
     }
   ]
 }
 ```
+> [!NOTE]
+> **Fusión y Precedencia de Contexto:** El contexto global actúa como base (`source`, `dataset`). Si la tarea define una clave colisionante (ej: `"fiscal_year": 2023`), la tarea individual prevalece sobre el global. Si no se envía contexto, ambos campos admiten `null` de forma segura.
 
 #### Respuesta (`202 Accepted`):
 ```json
 {
-  "job_id": "catalogo-productos-2026",
+  "job_id": "sec-edgar-filings-2026",
   "status": "accepted",
   "message": "El procesamiento ha comenzado en segundo plano."
 }
@@ -163,11 +174,11 @@ La suite de pruebas del Producer valida los contratos Pydantic, la orquestación
 cd producer
 uv sync
 
-# Ejecutar la suite completa (23 tests)
+# Ejecutar la suite completa (25 tests)
 uv run pytest
 
 # Verificar cobertura de código (98% total)
 uv run pytest --cov=producer --cov-report=term-missing
 ```
 
-Estado de calidad actual: **23/23 tests pasando** con **98% de cobertura de código**, superando holgadamente el Quality Gate del 80% de SonarCloud.
+Estado de calidad actual: **25/25 tests pasando** con **98% de cobertura de código**, superando holgadamente el Quality Gate del 80% de SonarCloud.

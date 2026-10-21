@@ -65,7 +65,7 @@ from shared.models import ScrapingTask
 # - parser_config: Diccionario con la configuración del parser.
 # - priority: Prioridad de ejecución (1 a 10).
 # - retry_count / max_retries: Control de reintentos y tolerancia a fallos.
-# - context: Metadatos extra que viajan con el mensaje (ej: ID de categoría).
+# - context: Metadatos combinados (global + tarea con precedencia) que viajan hasta S3/Parquet.
 ```
 
 #### Gobernanza y Políticas de Dominio (`DomainPolicy`)

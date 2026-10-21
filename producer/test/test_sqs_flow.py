@@ -115,3 +115,61 @@ async def test_sqs_message_routing_static_and_dynamic(async_client: AsyncClient,
     assert dynamic_body["url"] == "https://example.com/dynamic-page"
     assert dynamic_body["parser_type"] == "dynamic_playwright"
 
+
+@pytest.mark.asyncio
+async def test_sqs_task_context_overrides_global_context(async_client: AsyncClient, sqs_mock):
+    """Test that task-specific context takes precedence over global context and both are enqueued to SQS."""
+    static_queue = sqs_mock.get_queue_url(QueueName="test-queue")["QueueUrl"]
+
+    payload = {
+        "job_id": "job_ctx_merge_001",
+        "tasks": [
+            {
+                "url": "https://example.com/sec-10k",
+                "parser_type": "static_css",
+                "parser_config": {"selectors": {"title": "h1"}},
+                "context": {
+                    "cik": "0000320193",
+                    "year": 2023,
+                    "specific_flag": True
+                }
+            }
+        ],
+        "context": {
+            "source": "sec_edgar",
+            "year": 2024,
+            "global_flag": "global_value"
+        }
+    }
+
+    response = await async_client.post("/v1/scraping/tasks", json=payload)
+    assert response.status_code == 202
+
+    await asyncio.sleep(1.0)
+
+    static_response = sqs_mock.receive_message(QueueUrl=static_queue, MaxNumberOfMessages=10)
+    messages = static_response.get("Messages", [])
+    assert len(messages) >= 1
+
+    matched_message = None
+    for msg in messages:
+        body = json.loads(msg["Body"])
+        if body.get("job_id") == "job_ctx_merge_001":
+            matched_message = body
+            break
+
+    assert matched_message is not None
+    ctx = matched_message["context"]
+
+    # 1. Inherited from global context
+    assert ctx["source"] == "sec_edgar"
+    assert ctx["global_flag"] == "global_value"
+
+    # 2. Task-specific keys
+    assert ctx["cik"] == "0000320193"
+    assert ctx["specific_flag"] is True
+
+    # 3. Collision: task context MUST override global context
+    assert ctx["year"] == 2023
+
+

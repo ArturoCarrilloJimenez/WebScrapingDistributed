@@ -96,3 +96,30 @@ async def test_create_scraping_job_invalid_priority(async_client: AsyncClient):
     assert response.status_code == 422
     data = response.json()
     assert any("priority" in err["loc"] for err in data["detail"])
+
+
+@pytest.mark.asyncio
+async def test_create_scraping_job_accepts_null_and_task_context(async_client: AsyncClient, sqs_mock):
+    """Test that null contexts at global and task levels are handled gracefully without 422 errors."""
+    payload = {
+        "job_id": "job_null_ctx_001",
+        "tasks": [
+            {
+                "url": "https://example.com/task1",
+                "parser_type": "static_css",
+                "parser_config": {"selectors": {"title": "h1"}},
+                "context": None
+            },
+            {
+                "url": "https://example.com/task2",
+                "parser_type": "static_css",
+                "parser_config": {"selectors": {"title": "h2"}},
+                "context": {"cik": "0000320193", "year": 2023}
+            }
+        ],
+        "context": None
+    }
+    
+    response = await async_client.post("/v1/scraping/tasks", json=payload)
+    assert response.status_code == 202
+

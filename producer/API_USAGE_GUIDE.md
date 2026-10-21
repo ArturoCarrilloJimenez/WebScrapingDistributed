@@ -36,9 +36,9 @@ graph TD
 
 ```json
 {
-  "job_id": "string (Obligatorio - ID del grupo de scraping)",
+  "job_id": "string (Opcional - ID del grupo de scraping. Se autogenera si se omite)",
   "tasks": [
-    "Array de objetos ScrapingTask (Mínimo 1 tarea)"
+    "Array de objetos TaskModel (Mínimo 1 tarea, máximo 1000)"
   ],
   "context": {
     "string": "any (Opcional - Metadatos globales asignados a todas las tareas del lote)"
@@ -58,7 +58,7 @@ graph TD
 
 ---
 
-## ⚙️ 3. Parámetros de Control y Resiliencia por Tarea (`ScrapingTask`)
+## ⚙️ 3. Parámetros de Control y Resiliencia por Tarea (`TaskModel`)
 
 Cada objeto dentro del array `tasks` acepta las siguientes propiedades de control:
 
@@ -68,12 +68,33 @@ Cada objeto dentro del array `tasks` acepta las siguientes propiedades de contro
 | `parser_type` | `string` | **Sí** | - | Motor de scraping: `"static_css"` o `"dynamic_playwright"`. |
 | `parser_config` | `object` | **Sí** | `{}` | Objeto JSON con los selectores y parámetros específicos del motor. |
 | `priority` | `integer` | No | `1` | Prioridad de ejecución de 1 (baja) a 10 (alta). |
+| `max_depth` | `integer` | No | `1` | Límite de profundidad para evitar bucles de navegación. (esto es para futuros usos, no actualmente implementado) |
 | `max_retries` | `integer` | No | `3` | Intentos máximos ante errores de red/5xx antes de derivar a la DLQ (máx 10). |
-| `context` | `object` | No | `{}` | Diccionario de metadatos que viaja con la tarea (ej: `{"categoria_id": 99}`). |
+| `headers` | `object` | No | `null` | Cabeceras HTTP personalizadas por tarea (ej: `User-Agent` oficial SEC EDGAR). |
+| `respect_robots_txt` | `boolean` | No | `null` | Sobreescritura explícita de la política de `robots.txt` del dominio. |
+| `context` | `object` | No | `{}` | Diccionario de metadatos específicos de la tarea (sobrescribe valores del contexto global). |
 
 ---
 
-## 🛠️ 4. Selección del Motor de Scraping (`parser_type`)
+## 🧠 4. Jerarquía y Fusión de Contexto (Global vs Específico por Tarea)
+
+El sistema soporta **dos niveles de contexto de metadatos** (`context`), diseñados para alimentar pipelines analíticos y ETLs descendentes (como el procesamiento histórico de filings de la SEC):
+
+1. **Contexto Global (`BulkTaskRequest.context`):** Metadatos compartidos que aplican a todo el lote (ej: `source`, `dataset`, `ingestion_batch`).
+2. **Contexto de Tarea (`TaskModel.context`):** Metadatos específicos de cada URL individual (ej: `cik`, `accession_number`, `form_type`, `period`).
+
+### Reglas de Fusión y Precedencia:
+* **Fusión Automática:** El Producer combina ambos diccionarios antes de despachar a Amazon SQS:
+  ```python
+  context = {**(request.context or {}), **(task.context or {})}
+  ```
+* **Precedencia Específica:** Si una clave existe en ambos diccionarios, **el valor de la tarea individual sobreescribe al valor global**.
+* **Tolerancia a Nulos (`null` / `None`):** Ambos campos aceptan valores `null` o diccionarios vacíos sin provocar errores de validación HTTP 422.
+* **Propagación hasta S3 / Parquet:** El contexto resultante viaja íntegro dentro del mensaje SQS, es procesado por el Worker y se persiste en los registros JSON Lines y ficheros Parquet finales en S3 / MinIO, permitiendo recuperarlos directamente en tareas analíticas.
+
+---
+
+## 🛠️ 5. Selección del Motor de Scraping (`parser_type`)
 
 El sistema cuenta con dos motores especializados físicamente segregados en colas de SQS distintas:
 
@@ -98,7 +119,7 @@ graph LR
 
 ---
 
-## 🎯 5. Esquema de Extracción Estructurada (`parser_config`)
+## 🎯 6. Esquema de Extracción Estructurada (`parser_config`)
 
 El objeto `parser_config` utiliza el motor **UniversalDOMExtractor** para extraer exactamente los datos que necesites.
 
@@ -177,7 +198,7 @@ Se define el campo `container` con el selector CSS del bloque repetitivo (tarjet
 
 ---
 
-## 🎭 6. Opciones Avanzadas del Motor Dinámico (`dynamic_playwright`)
+## 🎭 7. Opciones Avanzadas del Motor Dinámico (`dynamic_playwright`)
 
 Cuando usas `"parser_type": "dynamic_playwright"`, puedes incluir parámetros adicionales en `parser_config` para controlar el navegador Chromium:
 
@@ -214,7 +235,7 @@ Cuando usas `"parser_type": "dynamic_playwright"`, puedes incluir parámetros ad
 
 ---
 
-## 🌐 7. Gestión de Proxies y Sticky Sessions (`context.sticky_session_id`)
+## 🌐 8. Gestión de Proxies y Sticky Sessions (`context.sticky_session_id`)
 
 Si necesitas realizar scraping navegando en varias páginas reteniendo la **misma dirección IP y la misma sesión de cookies** (por ejemplo, paginaciones o procesos con login):
 
@@ -237,7 +258,7 @@ El gestor de proxies calculará un hash consistente y garantizará que todas las
 
 ---
 
-## 🧪 8. Ejemplos Prácticos Completos Listos para Usar
+## 🧪 9. Ejemplos Prácticos Completos Listos para Usar
 
 ### Ejemplo 1: Ingesta Masiva SSR Estática (Milanuncios / Clasificados)
 
@@ -295,6 +316,69 @@ Invoke-RestMethod -Uri "http://localhost:8000/v1/scraping/tasks" -Method Post -C
         "timeout_ms": 25000
       },
       "priority": 8
+    }
+  ]
+}'
+```
+
+---
+
+### Ejemplo 3: Ingesta de ETL Histórico (SEC EDGAR) con Contexto Global y Específico
+
+Caso de uso real: Ingesta masiva de más de 3.000 documentos con cabecera `User-Agent` oficial requerida por la SEC, metadatos comunes a nivel de lote y metadatos individuales (CIK, Accession Number, Año) para procesado analítico posterior en S3/Parquet:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8000/v1/scraping/tasks" -Method Post -ContentType "application/json" -Body '{
+  "job_id": "sec-edgar-historical-2026",
+  "context": {
+    "source": "sec_edgar",
+    "dataset": "historical_filings_8k",
+    "ingestion_pipeline": "tfm_data_pipeline"
+  },
+  "tasks": [
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/320193/000032019324000106/aapl-20241031.htm",
+      "parser_type": "static_css",
+      "parser_config": {
+        "selectors": {
+          "document_title": "title",
+          "body_text": "body"
+        }
+      },
+      "headers": {
+        "User-Agent": "InvestigacionFinanciera contacto@miuniversidad.edu",
+        "Accept-Encoding": "gzip, deflate"
+      },
+      "context": {
+        "ticker": "AAPL",
+        "cik": "0000320193",
+        "accession_number": "0000320193-24-000106",
+        "filing_type": "8-K",
+        "fiscal_year": 2024
+      },
+      "priority": 3
+    },
+    {
+      "url": "https://www.sec.gov/Archives/edgar/data/789019/000078901924000050/msft-20241029.htm",
+      "parser_type": "static_css",
+      "parser_config": {
+        "selectors": {
+          "document_title": "title",
+          "body_text": "body"
+        }
+      },
+      "headers": {
+        "User-Agent": "InvestigacionFinanciera contacto@miuniversidad.edu",
+        "Accept-Encoding": "gzip, deflate"
+      },
+      "context": {
+        "ticker": "MSFT",
+        "cik": "0000789019",
+        "accession_number": "0000789019-24-000050",
+        "filing_type": "8-K",
+        "fiscal_year": 2024
+      },
+      "priority": 3
     }
   ]
 }'

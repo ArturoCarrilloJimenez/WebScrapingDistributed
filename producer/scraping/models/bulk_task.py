@@ -24,6 +24,11 @@ class TaskModel(BaseModel, ParserValidatedMixin):
         description="Sobreescribe la politica de robots.txt para esta tarea especifica",
     )
 
+    context: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Metadatos o contexto específico de esta tarea (sobrescribe claves del contexto global)",
+    )
+
     @field_validator("url", mode="after")
     @classmethod
     def convert_url_to_string(cls, v: HttpUrl) -> str:
@@ -45,7 +50,10 @@ class BulkTaskRequest(BaseModel):
         ..., min_length=1, max_length=1000, description="Lista de tareas a ejecutar"
     )
 
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Metadatos globales que se propagan a todas las tareas del lote (pueden ser sobreescritos por el contexto individual)",
+    )
 
     @field_validator("job_id")
     @classmethod
