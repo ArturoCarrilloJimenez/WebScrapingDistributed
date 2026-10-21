@@ -53,6 +53,8 @@ def s3_mock(moto_s3_server, moto_s3_port):
     orig_raw_bucket = settings.raw_s3_bucket_name
     orig_target_endpoint = settings.target_s3_endpoint_url
     orig_target_bucket = settings.target_s3_bucket_name
+    orig_target_access_key = settings.target_s3_access_key_id
+    orig_target_secret_key = settings.target_s3_secret_access_key
 
     # Sobrescribir settings globales
     settings.s3_endpoint_url = endpoint_url
@@ -64,6 +66,8 @@ def s3_mock(moto_s3_server, moto_s3_port):
     settings.raw_s3_bucket_name = "test-bucket"
     settings.target_s3_endpoint_url = endpoint_url
     settings.target_s3_bucket_name = "test-bucket"
+    settings.target_s3_access_key_id = "testing"
+    settings.target_s3_secret_access_key = "testing"
     
     yield s3_client
     
@@ -90,3 +94,5 @@ def s3_mock(moto_s3_server, moto_s3_port):
     settings.raw_s3_bucket_name = orig_raw_bucket
     settings.target_s3_endpoint_url = orig_target_endpoint
     settings.target_s3_bucket_name = orig_target_bucket
+    settings.target_s3_access_key_id = orig_target_access_key
+    settings.target_s3_secret_access_key = orig_target_secret_key

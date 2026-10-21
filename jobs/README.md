@@ -92,9 +92,9 @@ El módulo comparte un objeto centralizado de configuración mediante `jobs/conf
 | **Destino Analítico (Analytical Lake - AWS S3)** | | | |
 | `TARGET_S3_ENDPOINT_URL` | String | `http://localhost:4566` | Endpoint del Data Lake analítico de destino (AWS S3 Cloud o emulador). |
 | `TARGET_S3_BUCKET_NAME` | String | `scraping-data-lake` | Nombre del bucket analítico de destino. |
-| `TARGET_S3_REGION` | String | `us-east-1` | Región del Data Lake analítico de destino. |
-| `TARGET_AWS_ACCESS_KEY_ID` | String | `test` | Credencial de acceso para AWS S3 destino. |
-| `TARGET_AWS_SECRET_ACCESS_KEY` | String | `test` | Credencial secreta de acceso para AWS S3 destino. |
+| `TARGET_S3_REGION` | String | `auto` | Región del Data Lake analítico de destino (`auto` para Cloudflare R2, región AWS para AWS S3). |
+| `TARGET_S3_ACCESS_KEY_ID` | String | `None` | Credencial de acceso para S3 / Cloudflare R2 destino (32 caracteres en R2). |
+| `TARGET_S3_SECRET_ACCESS_KEY` | String | `None` | Credencial secreta de acceso para S3 / Cloudflare R2 destino (64 caracteres en R2). |
 | **Gestión de Ciclo de Vida y Prefijos** | | | |
 | `S3_PREFIX_RAW_DATA` | String | `raw-data` | Prefijo virtual de entrada para fragmentos crudos. |
 | `S3_PREFIX_COMPACTED_DATA` | String | `compacted-data` | Prefijo virtual de destino para datasets Parquet ZSTD. |
