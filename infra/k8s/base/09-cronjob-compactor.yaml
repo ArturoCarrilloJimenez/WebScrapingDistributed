@@ -7,8 +7,8 @@ metadata:
   labels:
     app: data-lake-compactor
 spec:
-  # Ejecución cada 30 minutos con ventana de recuperación de 1h ante suspensión/apagado local
-  schedule: "*/30 * * * *"
+  # Ejecución cada 15 minutos con ventana de recuperación de 1h ante suspensión/apagado local
+  schedule: "*/15 * * * *"
   startingDeadlineSeconds: 3600
   timeZone: "UTC"
   concurrencyPolicy: Forbid
