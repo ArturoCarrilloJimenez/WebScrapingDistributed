@@ -312,8 +312,13 @@ def _get_compaction_schema() -> pa.Schema:
     """
     return pa.schema([
         pa.field("task_id", pa.string()),
+        pa.field("batch_id", pa.string()),
         pa.field("url", pa.string()),
         pa.field("date", pa.timestamp("us")),
+        # Contexto completo de negocio y trazabilidad upstream (ej. metadatos SEC)
+        pa.field("context", pa.string()),
+        pa.field("parser_type", pa.string()),
+        pa.field("retry_count", pa.int32()),
         # Resiliencia analítica absoluta ante esquemas polimórficos
         pa.field("data", pa.string())
     ])
@@ -359,9 +364,24 @@ class JobCompactor:
 
     def append_record(self, parse_result: ParseResult) -> None:
         self.current_chunk_buffer["task_id"].append(parse_result.task.task_id)
+        self.current_chunk_buffer["batch_id"].append(parse_result.task.batch_id or "")
         self.current_chunk_buffer["url"].append(str(parse_result.task.url))
         self.current_chunk_buffer["date"].append(parse_result.task.created_at)
-        self.current_chunk_buffer["data"].append(json.dumps(parse_result.data))
+        self.current_chunk_buffer["context"].append(
+            json.dumps(parse_result.task.context or {}, default=str)
+        )
+        parser_type_val = getattr(
+            parse_result.task.parser_type,
+            "value",
+            str(parse_result.task.parser_type)
+        )
+        self.current_chunk_buffer["parser_type"].append(str(parser_type_val))
+        self.current_chunk_buffer["retry_count"].append(
+            int(parse_result.task.retry_count or 0)
+        )
+        self.current_chunk_buffer["data"].append(
+            json.dumps(parse_result.data, default=str)
+        )
         self.rows_in_chunk += 1
         self.rows_in_current_file += 1
 

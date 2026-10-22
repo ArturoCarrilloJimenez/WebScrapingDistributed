@@ -314,3 +314,84 @@ async def test_write_chunk_to_file(tmp_path):
     # Read back to verify
     table = pq.read_table(str(file_path))
     assert table.column("a").to_pylist() == [1, 2, 3]
+
+
+async def test_compaction_preserves_context_and_metadata(s3_mock):
+    import io
+    import pyarrow.parquet as pq
+    now = datetime.datetime.now(datetime.timezone.utc)
+    
+    sec_context = {
+        "cik": "0000320193",
+        "ticker": "AAPL",
+        "form": "10-K",
+        "fiscal_year": 2026
+    }
+    task_data = {
+        "task": {
+            "job_id": "sec-filings-job",
+            "batch_id": "sec-batch-001",
+            "task_id": "sec-task-999",
+            "url": "https://www.sec.gov/edgar/data/320193/000032019326000001/aapl-20260926.htm",
+            "parser_type": "static_css",
+            "parser_config": {"selectors": {"table": "table.report"}},
+            "priority": 2,
+            "max_depth": 0,
+            "retry_count": 1,
+            "max_retries": 3,
+            "context": sec_context,
+            "created_at": "2026-10-22T08:00:00Z"
+        },
+        "data": {"balance_sheet": {"cash": 30000000000}}
+    }
+    raw_line = json.dumps(task_data).encode("utf-8") + b"\n"
+    s3_mock.put_object(Bucket="test-bucket", Key="raw-data/job_id=sec-filings-job/part1.jsonl", Body=raw_line)
+    
+    batches = [
+        S3BatchFile(key="raw-data/job_id=sec-filings-job/part1.jsonl", size=len(raw_line), last_modified=now)
+    ]
+    job = ListOfJobs(
+        prefix="raw-data/job_id=sec-filings-job/",
+        batches=batches,
+        total_bytes=len(raw_line),
+        total_tasks=1,
+        last_modified=now - datetime.timedelta(hours=2),
+        inactive_time=datetime.timedelta(hours=2)
+    )
+    
+    with patch("compact_s3.MIN_INACTIVITY_SECONDS", 0):
+        semaphore = asyncio.Semaphore(1)
+        client_ctx = await get_aioboto_client()
+        async with client_ctx as client:
+            res = await compact_s3.process_job(
+                client, client, job, semaphore, raw_bucket="test-bucket", target_bucket="test-bucket"
+            )
+    
+    assert res == job
+    resp = s3_mock.list_objects_v2(Bucket="test-bucket", Prefix="compacted-data/job_id=sec-filings-job/")
+    assert len(resp.get("Contents", [])) == 1
+    compacted_key = resp["Contents"][0]["Key"]
+    
+    # Download Parquet from s3_mock and inspect columns
+    obj = s3_mock.get_object(Bucket="test-bucket", Key=compacted_key)
+    parquet_bytes = obj["Body"].read()
+    table = pq.read_table(io.BytesIO(parquet_bytes))
+    
+    # Verify columns exist
+    expected_cols = ["task_id", "batch_id", "url", "date", "context", "parser_type", "retry_count", "data"]
+    for col in expected_cols:
+        assert col in table.column_names
+    
+    # Verify values
+    assert table.column("task_id").to_pylist()[0] == "sec-task-999"
+    assert table.column("batch_id").to_pylist()[0] == "sec-batch-001"
+    assert table.column("parser_type").to_pylist()[0] == "static_css"
+    assert table.column("retry_count").to_pylist()[0] == 1
+    
+    # Verify context deserialization matches original SEC metadata exactly
+    stored_context_json = table.column("context").to_pylist()[0]
+    stored_context = json.loads(stored_context_json)
+    assert stored_context == sec_context
+    assert stored_context["cik"] == "0000320193"
+    assert stored_context["ticker"] == "AAPL"
+

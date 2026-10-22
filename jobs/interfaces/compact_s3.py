@@ -3,7 +3,6 @@ from typing import Any
 
 from pydantic import BaseModel
 
-
 from shared.models.scraping_task import ScrapingTask
 
 
@@ -30,6 +29,10 @@ class ParseResult(BaseModel):
 
 class ClearResult(BaseModel):
     task_id: str
+    batch_id: str = ""
     url: str
     date: datetime.datetime
-    data: Any
+    context: dict[str, Any] = {}
+    parser_type: str = ""
+    retry_count: int = 0
+    data: Any
