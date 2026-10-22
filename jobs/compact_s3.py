@@ -17,7 +17,7 @@ log = Logger("Compactar S3")
 
 # Umbrales y límites de compactación
 MIN_BYTES_FOR_COMPACTION = 300 * 1024 * 1024  # 300 MB
-MIN_INACTIVITY_SECONDS = 60 * 30             # 30 Minutos
+MIN_INACTIVITY_SECONDS = 60 * 7                # minutos de inactividad mínimo para considerar un job inactivo
 CHUNK_WRITE_SIZE = 20_000                    # Número de registros por lote intermedio en RAM antes de escribir a disco
 MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024      # 250 MB. Cuando el archivo en disco supera esta cota, se cierra y sube
 TOLERANCIA_COLA_BYTES = 50 * 1024 * 1024     # 50 MB. Si la cola remanente es menor a este tamaño, se absorbe en el archivo actual
