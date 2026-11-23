@@ -114,12 +114,14 @@ def get_robots_cache_service() -> RobotsCacheService:
 
 
 def get_parser_factory() -> ParserFactory:
-    # La factoría se alimenta del cliente centralizado de red y del extractor universal (que integra HoneypotGuard)
+    # La factoría se alimenta del cliente centralizado de red, extractor y gobernanza de subconsultas
     network_client = get_secure_network_client()
     extractor = get_dom_extractor()
     return ParserFactory(
         network_client=network_client,
-        extractor=extractor
+        extractor=extractor,
+        rate_limiter=get_domain_rate_limiter(),
+        robots_service=get_robots_cache_service(),
     )
 
 

@@ -395,3 +395,78 @@ async def test_compaction_preserves_context_and_metadata(s3_mock):
     assert stored_context["cik"] == "0000320193"
     assert stored_context["ticker"] == "AAPL"
 
+
+async def test_compaction_flushes_by_chunk_write_bytes_threshold(s3_mock):
+    """Verifica que JobCompactor vacíe chunks por tamaño en bytes (CHUNK_WRITE_BYTES) además de filas."""
+    import io
+    import pyarrow.parquet as pq
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    records = []
+    for idx in range(3):
+        payload = {
+            "task": {
+                "job_id": "sec-large-exhibits",
+                "batch_id": "b-large",
+                "task_id": f"task-large-{idx}",
+                "url": f"https://www.sec.gov/doc-{idx}.htm",
+                "parser_type": "static_css",
+                "parser_config": {"selectors": {"body_text": "body"}},
+                "created_at": "2026-10-22T08:00:00Z",
+            },
+            "data": {"body_text": ["X" * 2048]},
+        }
+        records.append(json.dumps(payload))
+
+    raw_bytes = ("\n".join(records) + "\n").encode("utf-8")
+    s3_mock.put_object(
+        Bucket="test-bucket",
+        Key="raw-data/job_id=sec-large-exhibits/part1.jsonl",
+        Body=raw_bytes,
+    )
+
+    batches = [
+        S3BatchFile(
+            key="raw-data/job_id=sec-large-exhibits/part1.jsonl",
+            size=len(raw_bytes),
+            last_modified=now,
+        )
+    ]
+    job = ListOfJobs(
+        prefix="raw-data/job_id=sec-large-exhibits/",
+        batches=batches,
+        total_bytes=len(raw_bytes),
+        total_tasks=3,
+        last_modified=now - datetime.timedelta(hours=2),
+        inactive_time=datetime.timedelta(hours=2),
+    )
+
+    with (
+        patch("compact_s3.MIN_INACTIVITY_SECONDS", 0),
+        patch("compact_s3.CHUNK_WRITE_BYTES", 1500),
+        patch("compact_s3._write_chunk_to_file", wraps=compact_s3._write_chunk_to_file) as spy_write,
+    ):
+        semaphore = asyncio.Semaphore(1)
+        client_ctx = await get_aioboto_client()
+        async with client_ctx as client:
+            res = await compact_s3.process_job(
+                client,
+                client,
+                job,
+                semaphore,
+                raw_bucket="test-bucket",
+                target_bucket="test-bucket",
+            )
+
+    assert res == job
+    # Cada registro supera 1500 bytes -> 3 flushes individuales en vez de 1 solo bloque
+    assert spy_write.call_count == 3
+
+    resp = s3_mock.list_objects_v2(
+        Bucket="test-bucket", Prefix="compacted-data/job_id=sec-large-exhibits/"
+    )
+    assert len(resp.get("Contents", [])) == 1
+    obj = s3_mock.get_object(Bucket="test-bucket", Key=resp["Contents"][0]["Key"])
+    table = pq.read_table(io.BytesIO(obj["Body"].read()))
+    assert table.num_rows == 3
+
