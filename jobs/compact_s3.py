@@ -19,6 +19,7 @@ log = Logger("Compactar S3")
 MIN_BYTES_FOR_COMPACTION = 300 * 1024 * 1024  # 300 MB
 MIN_INACTIVITY_SECONDS = 60 * 7                # minutos de inactividad mínimo para considerar un job inactivo
 CHUNK_WRITE_SIZE = 20_000                    # Número de registros por lote intermedio en RAM antes de escribir a disco
+CHUNK_WRITE_BYTES = 32 * 1024 * 1024         # 32 MB en RAM por lote intermedio (protege pods de 256Mi ante anexos grandes)
 MAX_FILE_SIZE_BYTES = 250 * 1024 * 1024      # 250 MB. Cuando el archivo en disco supera esta cota, se cierra y sube
 TOLERANCIA_COLA_BYTES = 50 * 1024 * 1024     # 50 MB. Si la cola remanente es menor a este tamaño, se absorbe en el archivo actual
 
@@ -349,6 +350,7 @@ class JobCompactor:
         self.part_counter = 0
         self.rows_in_current_file = 0
         self.rows_in_chunk = 0
+        self.bytes_in_chunk = 0
         self.current_chunk_buffer = {field.name: [] for field in schema}
         self.local_file_path = os.path.join(TMP_DIR, f"compact_{job_id}_{self.part_counter}.parquet")
         self.writer = None
@@ -363,13 +365,16 @@ class JobCompactor:
             self.first_date = first_date
 
     def append_record(self, parse_result: ParseResult) -> None:
-        self.current_chunk_buffer["task_id"].append(parse_result.task.task_id)
+        task_id_val = parse_result.task.task_id
+        url_val = str(parse_result.task.url)
+        context_json = json.dumps(parse_result.task.context or {}, default=str)
+        data_json = json.dumps(parse_result.data, default=str)
+
+        self.current_chunk_buffer["task_id"].append(task_id_val)
         self.current_chunk_buffer["batch_id"].append(parse_result.task.batch_id or "")
-        self.current_chunk_buffer["url"].append(str(parse_result.task.url))
+        self.current_chunk_buffer["url"].append(url_val)
         self.current_chunk_buffer["date"].append(parse_result.task.created_at)
-        self.current_chunk_buffer["context"].append(
-            json.dumps(parse_result.task.context or {}, default=str)
-        )
+        self.current_chunk_buffer["context"].append(context_json)
         parser_type_val = getattr(
             parse_result.task.parser_type,
             "value",
@@ -379,17 +384,29 @@ class JobCompactor:
         self.current_chunk_buffer["retry_count"].append(
             int(parse_result.task.retry_count or 0)
         )
-        self.current_chunk_buffer["data"].append(
-            json.dumps(parse_result.data, default=str)
-        )
+        self.current_chunk_buffer["data"].append(data_json)
         self.rows_in_chunk += 1
         self.rows_in_current_file += 1
+        self.bytes_in_chunk += (
+            len(task_id_val)
+            + len(url_val)
+            + len(context_json.encode("utf-8"))
+            + len(data_json.encode("utf-8"))
+        )
+
+    def should_flush_chunk(self) -> bool:
+        """Indica si el lote intermedio en RAM superó el límite de filas o bytes."""
+        return (
+            self.rows_in_chunk >= CHUNK_WRITE_SIZE
+            or self.bytes_in_chunk >= CHUNK_WRITE_BYTES
+        )
 
     async def flush_current_chunk(self) -> None:
         if self.rows_in_chunk > 0:
             await asyncio.to_thread(_write_chunk_to_file, self.writer, self.schema, self.current_chunk_buffer)
             self.current_chunk_buffer = {field.name: [] for field in self.schema}
             self.rows_in_chunk = 0
+            self.bytes_in_chunk = 0
 
     async def check_and_perform_split(self, b_idx: int) -> None:
         if not os.path.exists(self.local_file_path):
@@ -478,7 +495,7 @@ async def process_job(
                         compactor.initialize_writer_if_needed(parse_result)
                         compactor.append_record(parse_result)
 
-                        if compactor.rows_in_chunk >= CHUNK_WRITE_SIZE:
+                        if compactor.should_flush_chunk():
                             await compactor.flush_current_chunk()
                             await compactor.check_and_perform_split(b_idx)
                 finally:

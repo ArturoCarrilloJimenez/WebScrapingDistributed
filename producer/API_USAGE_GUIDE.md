@@ -196,6 +196,45 @@ Se define el campo `container` con el selector CSS del bloque repetitivo (tarjet
 > [!TIP]
 > Si el propio elemento contenedor es el que contiene el atributo que deseas extraer (por ejemplo, el enlace `<a class="ad-card" href="...">`), puedes usar `"selector": "self"` o `"selector": ""` dentro de `FieldSpec` para hacer referencia al contenedor mismo.
 
+#### Escenario 3: Subconsultas Declarativas en la Misma Tarea (`follow_links` en `static_css`)
+Permite que una única tarea descargue su `url` principal y, además, descubra y extraiga sub-enlaces (desde el propio HTML o desde un `source_url` auxiliar con `fallback_source_urls` opcional ante `404`), limpiando nodos ruidosos con `exclude_selectors` (ej. `ix:header`, `script`, `style`) y capturando metadatos de fila con `metadata_selectors`, consolidando todo en un único registro en S3/Parquet. Todas las sub-peticiones respetan `DomainRateLimiter`, `robots.txt` y las cabeceras `headers` de la tarea.
+
+```json
+{
+  "parser_type": "static_css",
+  "parser_config": {
+    "selectors": {
+      "body_text": "body"
+    },
+    "exclude_selectors": ["ix:header", "script", "style"],
+    "follow_links": [
+      {
+        "name": "exhibits",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/19617/000001961724000555/0000019617-24-000555-index.htm",
+        "fallback_source_urls": [
+          "https://www.sec.gov/Archives/edgar/data/19617/000001961724000555/0000019617-24-000555-index.html"
+        ],
+        "row_selector": "table.tableFile tr",
+        "link_selector": "td:nth-of-type(3) a",
+        "filter_selector": "td:nth-of-type(4)",
+        "filter_regex": "(?i)^EX-(?!101\\b)",
+        "url_strip_regex": "^/ix\\?doc=",
+        "max_links": 50,
+        "metadata_selectors": {
+          "description": "td:nth-of-type(2)",
+          "size": "td:nth-of-type(5)"
+        },
+        "exclude_selectors": ["ix:header", "script", "style"],
+        "selectors": {
+          "body_text": "body"
+        }
+      }
+    ]
+  }
+}
+```
+**Resultado en S3 Data Lake:** El mismo objeto JSON incluye `"body_text"` del documento principal y `"exhibits": [{"url": "...", "label": "EX-99.1", "metadata": {"description": "...", "size": "..."}, "data": {"body_text": [...]}}]`. Si `source_url` devuelve `404`, intenta en orden `fallback_source_urls`. Si un sub-enlace devuelve `404` o contenido no-HTML (ej. PDF/imagen), se registra `"error"` solo en ese elemento sin perder la extracción principal; errores transitorios (`429`, `403`, `5xx`, red) reintentan la tarea en SQS.
+
 ---
 
 ## 🎭 7. Opciones Avanzadas del Motor Dinámico (`dynamic_playwright`)
