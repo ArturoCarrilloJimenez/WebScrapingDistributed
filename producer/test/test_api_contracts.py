@@ -259,3 +259,96 @@ async def test_create_scraping_job_rejects_fallback_without_source_url(
     response = await async_client.post("/v1/scraping/tasks", json=payload)
     assert response.status_code == 422
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parser_config",
+    [
+        # L93: exclude_selectors vacío en FollowLinkRule
+        {
+            "selectors": {"body_text": "body"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "link_selector": "a",
+                    "exclude_selectors": ["   "],
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+        # L105: metadata_selectors con selector vacío
+        {
+            "selectors": {"body_text": "body"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "row_selector": "tr",
+                    "link_selector": "a",
+                    "metadata_selectors": {"description": "  "},
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+        # L148: exclude_selectors vacío en Config raíz
+        {
+            "selectors": {"body_text": "body"},
+            "exclude_selectors": [""],
+        },
+        # L158: container raíz + follow_links incompatible
+        {
+            "container": "div.item",
+            "selectors": {"title": "h2"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "link_selector": "a",
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+        # L165: colisión de rule.name con clave de selectors
+        {
+            "selectors": {"exhibits": "body"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "link_selector": "a",
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+        # L169: nombres duplicados en follow_links
+        {
+            "selectors": {"body_text": "body"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "link_selector": "a.first",
+                    "selectors": {"body_text": "body"},
+                },
+                {
+                    "name": "exhibits",
+                    "link_selector": "a.second",
+                    "selectors": {"body_text": "body"},
+                },
+            ],
+        },
+    ],
+)
+async def test_create_scraping_job_rejects_follow_links_edge_validations(
+    async_client: AsyncClient, parser_config: dict
+):
+    """Cubre todas las validaciones de FollowLinkRule y Config en static_css."""
+    payload = {
+        "job_id": "sec-validation-edges",
+        "tasks": [
+            {
+                "url": "https://example.com/doc",
+                "parser_type": "static_css",
+                "parser_config": parser_config,
+            }
+        ],
+    }
+    response = await async_client.post("/v1/scraping/tasks", json=payload)
+    assert response.status_code == 422
+
