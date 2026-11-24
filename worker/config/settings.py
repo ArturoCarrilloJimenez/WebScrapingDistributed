@@ -11,6 +11,7 @@ class ProxyMode(str, Enum):
 class Settings(BaseSettings):
     num_max_tasks: int = 10
     worker_num_max_concurrent_tasks: int = 10
+    worker_max_concurrent_dom_parses: int = 6
     
     # aws
     aws_access_key_id: str = "test" # Clave de acceso de AWS (puede ser cualquier valor para pruebas locales)

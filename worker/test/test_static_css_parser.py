@@ -678,3 +678,56 @@ async def test_parser_main_container_empty_list_raises_invalid_schema():
     with pytest.raises(ScrapingError) as exc_info:
         await parser.parse(task)
     assert exc_info.value.category == ErrorCategory.INVALID_SCHEMA
+
+
+async def test_parser_dom_semaphore_bounds_concurrent_parses_and_uses_lxml():
+    """Verifica que StaticCSSParser use lxml por defecto y acote los parseos DOM concurrentes."""
+    import asyncio
+    from scraping.parsers.static_css_parse import _DEFAULT_BS_PARSER
+
+    assert _DEFAULT_BS_PARSER == "lxml"
+
+    client = _create_multi_url_client({
+        "https://example.com/p1": (200, "<html><body><p>1</p></body></html>", None),
+        "https://example.com/p2": (200, "<html><body><p>2</p></body></html>", None),
+        "https://example.com/p3": (200, "<html><body><p>3</p></body></html>", None),
+        "https://example.com/p4": (200, "<html><body><p>4</p></body></html>", None),
+    })
+
+    active_parses = 0
+    max_observed_parses = 0
+    parser_1 = StaticCSSParser(network_client=client, max_concurrent_dom_parses=2)
+    parser_2 = StaticCSSParser(network_client=client, max_concurrent_dom_parses=2)
+
+    orig_extract = parser_1.extractor.extract_from_soup
+
+    def tracked_extract(*args, **kwargs):
+        nonlocal active_parses, max_observed_parses
+        active_parses += 1
+        max_observed_parses = max(max_observed_parses, active_parses)
+        res = orig_extract(*args, **kwargs)
+        active_parses -= 1
+        return res
+
+    with patch.object(parser_1.extractor, "extract_from_soup", side_effect=tracked_extract):
+        with patch.object(parser_2.extractor, "extract_from_soup", side_effect=tracked_extract):
+            tasks = [
+                ScrapingTask(
+                    job_id="j_sem",
+                    batch_id="b_sem",
+                    task_id=f"t_sem_{i}",
+                    url=f"https://example.com/p{i}",
+                    parser_type="static_css",
+                    parser_config={"selectors": {"val": "p"}},
+                )
+                for i in range(1, 5)
+            ]
+            results = await asyncio.gather(
+                parser_1.parse(tasks[0]),
+                parser_2.parse(tasks[1]),
+                parser_1.parse(tasks[2]),
+                parser_2.parse(tasks[3]),
+            )
+
+    assert len(results) == 4
+    assert max_observed_parses <= 2

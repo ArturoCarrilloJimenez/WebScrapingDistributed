@@ -21,13 +21,13 @@ spec:
           image: arturocarrillojimenez/web-scraping-worker:latest
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: "200m"
+              memory: "256Mi"
               ephemeral-storage: "50Mi"
             limits:
-              cpu: "300m"
-              memory: "256Mi"
-              ephemeral-storage: "200Mi"
+              cpu: "1000m"
+              memory: "1Gi"
+              ephemeral-storage: "500Mi"
           envFrom:
             - configMapRef:
                 name: scraping-config
