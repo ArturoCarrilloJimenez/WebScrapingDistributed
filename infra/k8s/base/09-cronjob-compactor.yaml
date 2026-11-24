@@ -35,9 +35,9 @@ spec:
                   memory: "128Mi"
                   ephemeral-storage: "100Mi"
                 limits:
-                  cpu: "400m"
-                  memory: "256Mi"
-                  ephemeral-storage: "300Mi"
+                  cpu: "500m"
+                  memory: "512Mi"
+                  ephemeral-storage: "1Gi"
               envFrom:
                 - configMapRef:
                     name: scraping-config

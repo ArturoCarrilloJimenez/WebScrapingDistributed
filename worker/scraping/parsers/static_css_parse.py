@@ -1,8 +1,11 @@
+import asyncio
+import importlib.util
 import re
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, Tag
+from config.settings import settings
 from infrastructure.network.client import SecureNetworkClient
 from scraping.exceptions import ErrorCategory, ScrapingError
 from scraping.interfaces.interfaces import ParseResult
@@ -13,9 +16,13 @@ from shared.models.parse_config.static_css import FollowLinkRule
 from .base import BaseParser
 from .extractor import UniversalDOMExtractor
 
+_DEFAULT_BS_PARSER = "lxml" if importlib.util.find_spec("lxml") else "html.parser"
+
 
 class StaticCSSParser(BaseParser):
     """Parser asíncrono universal para HTML estático con soporte opcional de subconsultas (follow_links)."""
+
+    _parse_semaphores: dict[tuple[int, int], asyncio.Semaphore] = {}
 
     def __init__(
         self,
@@ -23,12 +30,36 @@ class StaticCSSParser(BaseParser):
         extractor: Optional[UniversalDOMExtractor] = None,
         rate_limiter: Optional[DomainRateLimiter] = None,
         robots_service: Optional[RobotsCacheService] = None,
+        max_concurrent_dom_parses: Optional[int] = None,
+        bs_parser: str = _DEFAULT_BS_PARSER,
     ):
         super().__init__()
         self.network_client = network_client
         self.extractor = extractor or UniversalDOMExtractor()
         self.rate_limiter = rate_limiter
         self.robots_service = robots_service
+        self._max_concurrent_dom_parses = max(
+            1,
+            max_concurrent_dom_parses
+            if max_concurrent_dom_parses is not None
+            else settings.worker_max_concurrent_dom_parses,
+        )
+        self._bs_parser = bs_parser
+
+    @classmethod
+    def _get_parse_semaphore(cls, max_parses: int) -> asyncio.Semaphore:
+        """Retorna el semáforo de parseo DOM compartido para el event loop activo."""
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        key = (loop_id, max_parses)
+        sem = cls._parse_semaphores.get(key)
+        if sem is None:
+            cls._parse_semaphores = {
+                k: v for k, v in cls._parse_semaphores.items() if k[0] == loop_id
+            }
+            sem = asyncio.Semaphore(max_parses)
+            cls._parse_semaphores[key] = sem
+        return sem
 
     async def _fetch_response(self, task: ScrapingTask, target_url: str) -> Any:
         """Ejecuta una petición HTTP GET usando el pool de sesiones y clasifica errores."""
@@ -250,6 +281,24 @@ class StaticCSSParser(BaseParser):
             entry["data"] = data
         return entry
 
+    async def _parse_sublink_soup(
+        self,
+        raw_html: str,
+        rule: FollowLinkRule,
+    ) -> Any:
+        """Parsea y extrae un sub-documento bajo el semáforo DOM, liberando memoria al instante."""
+        async with self._get_parse_semaphore(self._max_concurrent_dom_parses):
+            sub_soup = BeautifulSoup(raw_html, self._bs_parser)
+            del raw_html
+            self._decompose_excluded(sub_soup, rule.exclude_selectors)
+            sub_data = self.extractor.extract_from_soup(
+                soup=sub_soup,
+                selectors=rule.selectors,
+                container=rule.container,
+            )
+            del sub_soup
+            return sub_data
+
     async def _fetch_and_extract_sublink(
         self,
         task: ScrapingTask,
@@ -282,13 +331,10 @@ class StaticCSSParser(BaseParser):
                 error=f"Contenido no HTML: {non_html_ct}",
             )
 
-        sub_soup = BeautifulSoup(response.text, "html.parser")
-        self._decompose_excluded(sub_soup, rule.exclude_selectors)
-        sub_data = self.extractor.extract_from_soup(
-            soup=sub_soup,
-            selectors=rule.selectors,
-            container=rule.container,
-        )
+        raw_html = response.text
+        del response
+        sub_data = await self._parse_sublink_soup(raw_html, rule)
+        del raw_html
         if self._is_extracted_empty(sub_data):
             return self._build_sublink_entry(
                 target_url,
@@ -301,18 +347,18 @@ class StaticCSSParser(BaseParser):
             target_url, matched_label, metadata, data=sub_data
         )
 
-    async def _fetch_first_available_index(
+    async def _fetch_index_candidates(
         self,
         task: ScrapingTask,
         index_urls: list[str],
-    ) -> Optional[tuple[BeautifulSoup, str]]:
-        """Intenta descargar la primera URL índice disponible probando fallbacks ante HTTP 404."""
+        rule: FollowLinkRule,
+    ) -> Optional[list[tuple[str, Optional[str], Optional[dict[str, Optional[str]]]]]]:
+        """Descarga la primera URL índice disponible probando fallbacks ante 404 y extrae sus candidatos."""
         for candidate_url in index_urls:
             if not await self._acquire_domain_clearance(task, candidate_url):
                 continue
             try:
                 source_resp = await self._fetch_response(task, candidate_url)
-                return BeautifulSoup(source_resp.text, "html.parser"), candidate_url
             except ScrapingError as se:
                 if se.category == ErrorCategory.NOT_FOUND:
                     self.log.info(
@@ -320,6 +366,17 @@ class StaticCSSParser(BaseParser):
                     )
                     continue
                 raise
+
+            raw_index_html = source_resp.text
+            del source_resp
+            async with self._get_parse_semaphore(self._max_concurrent_dom_parses):
+                base_soup = BeautifulSoup(raw_index_html, self._bs_parser)
+                del raw_index_html
+                candidates = self._extract_follow_candidates(
+                    base_soup, candidate_url, rule
+                )
+                del base_soup
+                return candidates
 
         self.log.warning(
             f"Ninguna URL índice respondió en tarea {task.task_id} ({index_urls}). Se conserva extracción principal."
@@ -329,24 +386,23 @@ class StaticCSSParser(BaseParser):
     async def _resolve_follow_rule(
         self,
         task: ScrapingTask,
-        main_soup: BeautifulSoup,
         rule: FollowLinkRule,
+        direct_candidates: Optional[
+            list[tuple[str, Optional[str], Optional[dict[str, Optional[str]]]]]
+        ] = None,
     ) -> list[dict[str, Any]]:
-        """Resuelve la página índice (con fallbacks si aplica) y extrae cada sub-enlace."""
+        """Resuelve los candidatos (desde source_url con fallbacks o desde HTML principal) y extrae cada sub-enlace."""
         if rule.source_url is not None:
             index_urls = [
                 str(rule.source_url),
                 *(str(u) for u in (rule.fallback_source_urls or [])),
             ]
-            resolved_index = await self._fetch_first_available_index(task, index_urls)
-            if resolved_index is None:
+            candidates = await self._fetch_index_candidates(task, index_urls, rule)
+            if candidates is None:
                 return []
-            base_soup, base_url = resolved_index
         else:
-            base_soup = main_soup
-            base_url = str(task.url)
+            candidates = direct_candidates or []
 
-        candidates = self._extract_follow_candidates(base_soup, base_url, rule)
         results: list[dict[str, Any]] = []
         for target_url, matched_label, metadata in candidates:
             item = await self._fetch_and_extract_sublink(
@@ -355,16 +411,20 @@ class StaticCSSParser(BaseParser):
             results.append(item)
         return results
 
-    async def parse(self, task: ScrapingTask) -> ParseResult:
-        """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
+    async def _parse_main_document(
+        self,
+        task: ScrapingTask,
+        raw_html: str,
+        follow_rules: list[FollowLinkRule],
+    ) -> tuple[Any, dict[str, list[tuple[str, Optional[str], Optional[dict[str, Optional[str]]]]]]]:
+        """Parsea el HTML principal bajo el semáforo DOM, extrae campos y precalcula candidatos sin source_url."""
         selectors = task.parser_config.get("selectors", {})
         container = task.parser_config.get("container")
         exclude_selectors = task.parser_config.get("exclude_selectors")
-        raw_follow_rules = task.parser_config.get("follow_links") or []
 
-        try:
-            response = await self._fetch_response(task, str(task.url))
-            soup = BeautifulSoup(response.text, "html.parser")
+        async with self._get_parse_semaphore(self._max_concurrent_dom_parses):
+            soup = BeautifulSoup(raw_html, self._bs_parser)
+            del raw_html
             self._decompose_excluded(soup, exclude_selectors)
 
             extracted = self.extractor.extract_from_soup(
@@ -374,17 +434,46 @@ class StaticCSSParser(BaseParser):
             )
 
             if self._is_extracted_empty(extracted):
+                del soup
                 raise ScrapingError(
                     ErrorCategory.INVALID_SCHEMA,
                     "Selectores no extrajeron datos (posible cambio de DOM)",
                     task.task_id,
                 )
 
-            if raw_follow_rules and isinstance(extracted, dict):
-                for raw_rule in raw_follow_rules:
-                    rule = FollowLinkRule.model_validate(raw_rule)
+            direct_candidates: dict[
+                str, list[tuple[str, Optional[str], Optional[dict[str, Optional[str]]]]]
+            ] = {}
+            if follow_rules and isinstance(extracted, dict):
+                base_url = str(task.url)
+                for rule in follow_rules:
+                    if rule.source_url is None:
+                        direct_candidates[rule.name] = self._extract_follow_candidates(
+                            soup, base_url, rule
+                        )
+
+            del soup
+            return extracted, direct_candidates
+
+    async def parse(self, task: ScrapingTask) -> ParseResult:
+        """Parser asíncrono universal para HTML estático libre de bloqueos TLS 403."""
+        raw_follow_rules = task.parser_config.get("follow_links") or []
+
+        try:
+            follow_rules = [FollowLinkRule.model_validate(r) for r in raw_follow_rules]
+            response = await self._fetch_response(task, str(task.url))
+            raw_html = response.text
+            del response
+
+            extracted, direct_candidates = await self._parse_main_document(
+                task, raw_html, follow_rules
+            )
+            del raw_html
+
+            if follow_rules and isinstance(extracted, dict):
+                for rule in follow_rules:
                     extracted[rule.name] = await self._resolve_follow_rule(
-                        task, soup, rule
+                        task, rule, direct_candidates.get(rule.name)
                     )
 
         except ScrapingError:

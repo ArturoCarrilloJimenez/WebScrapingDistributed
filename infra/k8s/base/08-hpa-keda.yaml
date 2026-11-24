@@ -27,7 +27,7 @@ spec:
     kind: Deployment
     name: worker-static
   minReplicaCount: 0
-  maxReplicaCount: 10
+  maxReplicaCount: 4
   cooldownPeriod: 30
   pollingInterval: 15
   triggers:
@@ -36,7 +36,7 @@ spec:
         name: keda-aws-credentials
       metadata:
         queueURLFromEnv: SQS_QUEUE_URL
-        queueLength: "45"
+        queueLength: "60"
         awsRegion: "eu-central-1"
 
 ---
@@ -53,7 +53,7 @@ spec:
     kind: Deployment
     name: worker-dynamic
   minReplicaCount: 0
-  maxReplicaCount: 4
+  maxReplicaCount: 2
   cooldownPeriod: 60
   pollingInterval: 15
   triggers:
