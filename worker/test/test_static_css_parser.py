@@ -500,3 +500,181 @@ async def test_parser_follow_links_all_index_urls_404_preserves_main():
     result = await parser.parse(task)
     assert result.data["body_text"] == ["Legacy 2010 8-K"]
     assert result.data["exhibits"] == []
+
+
+async def test_parser_follow_links_robots_disallowed_index_and_sublink():
+    """Cubre bloqueo de robots.txt tanto en source_url como en sub-enlaces."""
+    doc_url = "https://www.sec.gov/doc.htm"
+    blocked_idx = "https://www.sec.gov/blocked-index.htm"
+    allowed_idx = "https://www.sec.gov/allowed-index.htm"
+    blocked_sub = "https://www.sec.gov/blocked-sub.htm"
+
+    client = _create_multi_url_client({
+        doc_url: (200, "<html><body><p>Main</p></body></html>", None),
+        allowed_idx: (
+            200,
+            "<html><body><a class='ex' href='/blocked-sub.htm'>EX-99.1</a></body></html>",
+            None,
+        ),
+    })
+
+    async def fake_is_allowed(url: str, user_agent=None, respect_robots_txt=True):
+        if url in (blocked_idx, blocked_sub):
+            return False, "disallowed"
+        return True, "allowed"
+
+    robots_service = MagicMock()
+    robots_service.is_allowed = AsyncMock(side_effect=fake_is_allowed)
+
+    parser = StaticCSSParser(network_client=client, robots_service=robots_service)
+    task = ScrapingTask(
+        job_id="j_rob",
+        batch_id="b_rob",
+        task_id="t_rob",
+        url=doc_url,
+        parser_type="static_css",
+        parser_config={
+            "selectors": {"body_text": "p"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "source_url": blocked_idx,
+                    "fallback_source_urls": [allowed_idx],
+                    "link_selector": "a.ex",
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+    )
+
+    result = await parser.parse(task)
+    assert result.data["body_text"] == ["Main"]
+    assert result.data["exhibits"][0]["error"] == "DISALLOWED_ROBOTS_TXT"
+
+
+async def test_parser_follow_links_index_transient_error_raises():
+    """Valida que un 429 en source_url propague ScrapingError para reintento SQS."""
+    doc_url = "https://www.sec.gov/doc.htm"
+    index_url = "https://www.sec.gov/index.htm"
+    client = _create_multi_url_client({
+        doc_url: (200, "<html><body><p>Main</p></body></html>", None),
+        index_url: (429, "Too Many Requests", None),
+    })
+
+    parser = StaticCSSParser(network_client=client)
+    task = ScrapingTask(
+        job_id="j_idx429",
+        batch_id="b_idx429",
+        task_id="t_idx429",
+        url=doc_url,
+        parser_type="static_css",
+        parser_config={
+            "selectors": {"body_text": "p"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "source_url": index_url,
+                    "link_selector": "a",
+                    "selectors": {"body_text": "body"},
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(ScrapingError) as exc_info:
+        await parser.parse(task)
+    assert exc_info.value.category == ErrorCategory.BLOCKED
+
+
+async def test_parser_follow_links_candidate_filtering_and_sublink_empty_edges():
+    """Cubre casos borde de candidatos (sin <a>, sin href, #ancla, javascript:, duplicado, max_links), content-type vacío y sub-extracción vacía."""
+    main_url = "https://example.com/main"
+    valid_1 = "https://example.com/ok1.htm"
+    empty_sub = "https://example.com/empty.htm"
+    capped_sub = "https://example.com/capped.htm"
+
+    main_html = """
+    <html><body>
+      <p>Principal</p>
+      <table class="tbl">
+        <tr><td>NoLinkRow</td></tr>
+        <tr><td><a href="/skip.htm">SKIP_TEXT</a></td></tr>
+        <tr><td><a>KEEP_NO_HREF</a></td></tr>
+        <tr><td><a href="#section">KEEP_ANCHOR</a></td></tr>
+        <tr><td><a href="javascript:void(0)">KEEP_JS</a></td></tr>
+        <tr><td><a href="/ok1.htm">KEEP_1</a></td></tr>
+        <tr><td><a href="/ok1.htm">KEEP_DUP</a></td></tr>
+        <tr><td><a href="/empty.htm">KEEP_EMPTY</a></td></tr>
+        <tr><td><a href="/capped.htm">KEEP_CAPPED</a></td></tr>
+      </table>
+    </body></html>
+    """
+
+    async def mock_get(url: str, allow_redirects: bool = True):
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.raise_for_status.return_value = None
+        if url == main_url:
+            resp.text = main_html
+            resp.headers = None
+        elif url == valid_1:
+            resp.text = "<html><body><span>OK1</span></body></html>"
+            resp.headers = {"content-type": "   "}
+        elif url == empty_sub:
+            resp.text = "<html><body><div>Sin selector</div></body></html>"
+            resp.headers = {"content-type": "text/html"}
+        elif url == capped_sub:
+            raise AssertionError("No debería descargar enlaces más allá de max_links=2")
+        return resp
+
+    mock_session = AsyncMock()
+    mock_session.get.side_effect = mock_get
+    mock_client = MagicMock()
+    mock_client.get_session = AsyncMock(return_value=mock_session)
+
+    parser = StaticCSSParser(network_client=mock_client)
+    task = ScrapingTask(
+        job_id="j_edges",
+        batch_id="b_edges",
+        task_id="t_edges",
+        url=main_url,
+        parser_type="static_css",
+        parser_config={
+            "selectors": {"body_text": "p"},
+            "follow_links": [
+                {
+                    "name": "exhibits",
+                    "row_selector": "table.tbl tr",
+                    "link_selector": "a",
+                    "filter_regex": "^KEEP_",
+                    "max_links": 2,
+                    "selectors": {"span_val": "span"},
+                }
+            ],
+        },
+    )
+
+    result = await parser.parse(task)
+    assert len(result.data["exhibits"]) == 2
+    assert result.data["exhibits"][0]["data"]["span_val"] == ["OK1"]
+    assert result.data["exhibits"][1]["error"] == "Selectores no extrajeron datos"
+
+
+async def test_parser_main_container_empty_list_raises_invalid_schema():
+    """Cubre _is_extracted_empty([]) cuando container raíz no encuentra coincidencias."""
+    html = "<html><body><div>Nada</div></body></html>"
+    client = _create_multi_url_client({"https://example.com/list": (200, html, None)})
+    parser = StaticCSSParser(network_client=client)
+
+    task = ScrapingTask(
+        job_id="j_empty_list",
+        batch_id="b_empty_list",
+        task_id="t_empty_list",
+        url="https://example.com/list",
+        parser_type="static_css",
+        parser_config={"container": "article.card", "selectors": {"title": "h2"}},
+    )
+
+    with pytest.raises(ScrapingError) as exc_info:
+        await parser.parse(task)
+    assert exc_info.value.category == ErrorCategory.INVALID_SCHEMA
